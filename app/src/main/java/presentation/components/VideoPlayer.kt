@@ -4,7 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
-import android.view.ViewGroup
+import android.net.Uri
+import android.provider.MediaStore
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -27,6 +28,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -35,152 +37,99 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayer(
-    uri: android.net.Uri,
+    uri: Uri,
     onNext: () -> Unit,
     onPrev: () -> Unit,
-    modifier: Modifier = Modifier,
-    startMuted: Boolean = true // נשאיר, אבל הנגן ישלוט בווליום
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // --- מצבים ---
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(false) }
+    var showInfoButton by remember { mutableStateOf(false) }
+    var showInfoDialog by remember { mutableStateOf(false) }
+    var showActionMenu by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isLooping by remember { mutableStateOf(false) }
+    var hasEnded by remember { mutableStateOf(false) }
+    var isDragging by remember { mutableStateOf(false) }
 
-    // --- אינדיקטורים ---
     var showVolumeIndicator by remember { mutableStateOf(false) }
     var currentVolumeLevel by remember { mutableFloatStateOf(0.5f) }
-
     var showBrightnessIndicator by remember { mutableStateOf(false) }
     var currentBrightnessLevel by remember { mutableFloatStateOf(0.5f) }
-
-    // Seek
     var showSeekIndicator by remember { mutableStateOf(false) }
     var seekPreviewTime by remember { mutableLongStateOf(0L) }
 
-    // ExoPlayer Setup
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true // ברירת מחדל לניגון אוטומטי
+            playWhenReady = true
             repeatMode = Player.REPEAT_MODE_OFF
         }
     }
 
-    // Load Media & Auto Play Logic
     LaunchedEffect(uri) {
+        hasEnded = false
+        isDragging = false
+        showSeekIndicator = false
+        showVolumeIndicator = false
+        showBrightnessIndicator = false
+        showInfoButton = false
+        showInfoDialog = false
+        showActionMenu = false
+
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
         val mediaItem = MediaItem.fromUri(uri)
-        if (exoPlayer.currentMediaItem?.localConfiguration?.uri != uri) {
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.prepare()
-            exoPlayer.play() // פקודה מפורשת לנגן!
-        }
+        exoPlayer.setMediaItem(mediaItem)
+        exoPlayer.seekTo(0)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+        delay(200)
+        exoPlayer.play()
     }
 
-    // Handle Loop
     LaunchedEffect(isLooping) {
         exoPlayer.repeatMode = if (isLooping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    // Loop for progress updates
-    LaunchedEffect(exoPlayer) {
+    LaunchedEffect(Unit) {
         while (true) {
-            currentPosition = exoPlayer.currentPosition
-            duration = exoPlayer.duration.coerceAtLeast(0L)
-            isPlaying = exoPlayer.isPlaying
+            if (!isDragging) {
+                currentPosition = exoPlayer.currentPosition
+                duration = exoPlayer.duration.coerceAtLeast(0L)
+                isPlaying = exoPlayer.isPlaying
 
-            if (exoPlayer.playbackState == Player.STATE_ENDED && !isLooping) {
-                onNext()
+                if (exoPlayer.playbackState == Player.STATE_ENDED && !isLooping && !hasEnded) {
+                    hasEnded = true
+                    delay(200)
+                    onNext()
+                }
             }
-            delay(500)
+            delay(100)
         }
     }
 
     DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+        onDispose {
+            exoPlayer.stop()
+            exoPlayer.release()
+        }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onLongPress = { shareMedia(context, uri, true) },
-                    onTap = { offset ->
-                        val w = size.width
-                        if (offset.x < w * 0.25) onPrev()
-                        else if (offset.x > w * 0.75) onNext()
-                        else isControlsVisible = !isControlsVisible
-                    }
-                )
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { },
-                    onDragEnd = {
-                        // --- התיקון ל-SEEK ---
-                        // מבצעים את הקפיצה רק כשהמשתמש עוזב את האצבע
-                        if (showSeekIndicator) {
-                            exoPlayer.seekTo(seekPreviewTime)
-                            // מיד אחרי Seek, אם הנגן היה במצב Pause או Buffering, נחזיר אותו לניגון
-                            exoPlayer.play()
-                            showSeekIndicator = false
-                        }
-
-                        scope.launch {
-                            delay(1000)
-                            showVolumeIndicator = false
-                            showBrightnessIndicator = false
-                        }
-                    }
-                ) { change, dragAmount ->
-                    change.consume()
-                    val (dx, dy) = dragAmount
-
-                    if (abs(dx) > abs(dy)) {
-                        // --- גלילה אופקית (Seek) ---
-                        // רגישות Seek: פיקסל אחד = 100 מילי-שניות (למשל)
-                        val seekDelta = (dx * 100).toLong()
-                        seekPreviewTime = (currentPosition + seekDelta).coerceIn(0, duration)
-
-                        // עדכון ה-UI בלבד (לא מבצעים Seek בנגן עדיין כדי למנוע קרטועים)
-                        showSeekIndicator = true
-
-                    } else {
-                        // --- גלילה אנכית (Volume / Brightness) ---
-                        val isRightSide = change.position.x > size.width / 2
-
-                        // רגישות מופחתת מאוד: מחלקים ב-3000 כדי שיהיה שינוי איטי
-                        // הערך של dy הוא בפיקסלים, יכול להיות מהיר מאוד
-                        val sensitivity = 500f // מספר גדול = שינוי איטי יותר
-
-                        if (isRightSide) {
-                            // בהירות
-                            val changeAmount = -dy / sensitivity // מינוס כי למעלה זה שלילי ב-Android
-                            currentBrightnessLevel = adjustAppBrightness(context, changeAmount)
-                            showBrightnessIndicator = true
-                            showVolumeIndicator = false
-                        } else {
-                            // ווליום
-                            val changeAmount = -dy / sensitivity
-                            currentVolumeLevel = adjustAppVolume(context, changeAmount)
-                            showVolumeIndicator = true
-                            showBrightnessIndicator = false
-                        }
-                    }
-                }
-            }
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = {
                 PlayerView(context).apply {
@@ -190,10 +139,63 @@ fun VideoPlayer(
                     layoutParams = FrameLayout.LayoutParams(-1, -1)
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = {
+                            if (showSeekIndicator) {
+                                exoPlayer.seekTo(seekPreviewTime)
+                                if (!exoPlayer.isPlaying) {
+                                    exoPlayer.play()
+                                }
+                            }
+                            scope.launch {
+                                delay(1500)
+                                showSeekIndicator = false
+                                showVolumeIndicator = false
+                                showBrightnessIndicator = false
+                                isDragging = false
+                            }
+                        },
+                        onDragCancel = {
+                            showSeekIndicator = false
+                            showVolumeIndicator = false
+                            showBrightnessIndicator = false
+                            isDragging = false
+                        }
+                    ) { change, dragAmount ->
+                        val (dx, dy) = dragAmount
+
+                        if (abs(dx) > abs(dy) * 1.2f && abs(dx) > 10) {
+                            val seekSensitivity = 100f
+                            val seekDelta = (dx * seekSensitivity).toLong()
+                            seekPreviewTime = (currentPosition + seekDelta).coerceIn(0, duration)
+                            showSeekIndicator = true
+                            showVolumeIndicator = false
+                            showBrightnessIndicator = false
+                        } else if (abs(dy) > 15) {
+                            val isRightSide = change.position.x > size.width / 2
+                            val sensitivity = 2000f
+
+                            if (isRightSide) {
+                                currentBrightnessLevel = adjustAppBrightness(context, -dy / sensitivity)
+                                showBrightnessIndicator = true
+                                showVolumeIndicator = false
+                                showSeekIndicator = false
+                            } else {
+                                currentVolumeLevel = adjustAppVolume(context, -dy / sensitivity)
+                                showVolumeIndicator = true
+                                showBrightnessIndicator = false
+                                showSeekIndicator = false
+                            }
+                        }
+                    }
+                }
         )
 
-        // Seek Indicator
         AnimatedVisibility(
             visible = showSeekIndicator,
             enter = fadeIn(),
@@ -202,15 +204,14 @@ fun VideoPlayer(
         ) {
             Box(
                 modifier = Modifier
-                    .background(Color.Black.copy(0.7f), RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(0.8f), RoundedCornerShape(16.dp))
                     .padding(24.dp)
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // הצגת זמן + וכמה שניות קפצנו
                     val diff = seekPreviewTime - currentPosition
                     val sign = if (diff > 0) "+" else ""
                     Text(
-                        text = "${formatTime(seekPreviewTime)}",
+                        text = formatTime(seekPreviewTime),
                         color = Color.White,
                         style = MaterialTheme.typography.headlineLarge
                     )
@@ -223,7 +224,6 @@ fun VideoPlayer(
             }
         }
 
-        // Volume Indicator
         AnimatedVisibility(
             visible = showVolumeIndicator,
             enter = fadeIn(),
@@ -231,7 +231,7 @@ fun VideoPlayer(
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 30.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.VolumeUp, null, tint = Color.White)
+                Icon(Icons.Default.VolumeUp, null, tint = Color.White, modifier = Modifier.size(32.dp))
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { currentVolumeLevel },
@@ -242,10 +242,11 @@ fun VideoPlayer(
                         .background(Color.Gray.copy(0.5f)),
                     color = Color.White,
                 )
+                Spacer(Modifier.height(8.dp))
+                Text("${(currentVolumeLevel * 100).toInt()}%", color = Color.White, style = MaterialTheme.typography.bodySmall)
             }
         }
 
-        // Brightness Indicator
         AnimatedVisibility(
             visible = showBrightnessIndicator,
             enter = fadeIn(),
@@ -253,7 +254,7 @@ fun VideoPlayer(
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 30.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Brightness6, null, tint = Color.Yellow)
+                Icon(Icons.Default.Brightness6, null, tint = Color.Yellow, modifier = Modifier.size(32.dp))
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { currentBrightnessLevel },
@@ -264,10 +265,35 @@ fun VideoPlayer(
                         .background(Color.Gray.copy(0.5f)),
                     color = Color.Yellow,
                 )
+                Spacer(Modifier.height(8.dp))
+                Text("${(currentBrightnessLevel * 100).toInt()}%", color = Color.White, style = MaterialTheme.typography.bodySmall)
             }
         }
 
-        // Controls
+        // Info button (top-left when center is tapped)
+        AnimatedVisibility(
+            visible = showInfoButton,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            IconButton(
+                onClick = { showInfoDialog = true },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color.Black.copy(0.6f), RoundedCornerShape(24.dp))
+            ) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = "Info",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+
         AnimatedVisibility(
             visible = isControlsVisible,
             enter = fadeIn(),
@@ -279,10 +305,14 @@ fun VideoPlayer(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = { isControlsVisible = false }) {
+                        Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                    }
                     IconButton(onClick = { isLooping = !isLooping }) {
                         Icon(
                             if (isLooping) Icons.Default.RepeatOne else Icons.Default.Repeat,
-                            null, tint = if (isLooping) MaterialTheme.colorScheme.primary else Color.White,
+                            null,
+                            tint = if (isLooping) MaterialTheme.colorScheme.primary else Color.White,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -292,33 +322,30 @@ fun VideoPlayer(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onPrev) { Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
+                    IconButton(onClick = onPrev) {
+                        Icon(Icons.Default.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                    }
                     IconButton(onClick = {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                        isPlaying = !isPlaying
                     }) {
                         Icon(
                             if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             null, tint = Color.White, modifier = Modifier.size(64.dp)
                         )
                     }
-                    IconButton(onClick = onNext) { Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(48.dp)) }
+                    IconButton(onClick = onNext) {
+                        Icon(Icons.Default.SkipNext, null, tint = Color.White, modifier = Modifier.size(48.dp))
+                    }
                 }
                 Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(formatTime(currentPosition), color = Color.White)
                         Text(formatTime(duration), color = Color.White)
                     }
                     Slider(
-                        value = currentPosition.toFloat(),
-                        onValueChange = {
-                            currentPosition = it.toLong()
-                            exoPlayer.seekTo(currentPosition)
-                        },
-                        valueRange = 0f..duration.toFloat(),
+                        value = if (duration > 0) currentPosition.toFloat() else 0f,
+                        onValueChange = { exoPlayer.seekTo(it.toLong()) },
+                        valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -328,26 +355,244 @@ fun VideoPlayer(
                 }
             }
         }
+
+        if (!isControlsVisible && !isDragging) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .weight(0.35f)
+                        .fillMaxHeight()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onPrev() },
+                                onLongPress = { showActionMenu = true }
+                            )
+                        }
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(0.3f)
+                        .fillMaxHeight()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = {
+                                    showInfoButton = !showInfoButton
+                                    if (!showInfoButton) {
+                                        isControlsVisible = true
+                                    }
+                                },
+                                onLongPress = { showActionMenu = true }
+                            )
+                        }
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(0.35f)
+                        .fillMaxHeight()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { onNext() },
+                                onLongPress = { showActionMenu = true }
+                            )
+                        }
+                )
+            }
+        }
+
+        // Info Dialog
+        if (showInfoDialog) {
+            MediaInfoDialog(
+                uri = uri,
+                isVideo = true,
+                onDismiss = { showInfoDialog = false }
+            )
+        }
+
+        // Action Menu (Share, Open With)
+        if (showActionMenu) {
+            ActionMenuDialog(
+                uri = uri,
+                isVideo = true,
+                onDismiss = { showActionMenu = false }
+            )
+        }
     }
 }
 
-// --- פונקציות מתוקנות לרגישות נמוכה ---
+@Composable
+fun MediaInfoDialog(
+    uri: Uri,
+    isVideo: Boolean,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val mediaInfo = remember { getMediaInfo(context, uri) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Media Information") },
+        text = {
+            Column {
+                InfoRow("Name:", mediaInfo.name)
+                InfoRow("Size:", mediaInfo.size)
+                InfoRow("Path:", mediaInfo.path)
+                InfoRow("Date:", mediaInfo.date)
+                if (isVideo) {
+                    InfoRow("Duration:", mediaInfo.duration)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width(80.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+fun ActionMenuDialog(
+    uri: Uri,
+    isVideo: Boolean,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Actions") },
+        text = {
+            Column {
+                TextButton(
+                    onClick = {
+                        shareMedia(context, uri, isVideo)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Share, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Share")
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = {
+                        openWith(context, uri, isVideo)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Open With")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+data class MediaInfo(
+    val name: String,
+    val size: String,
+    val path: String,
+    val date: String,
+    val duration: String
+)
+
+fun getMediaInfo(context: Context, uri: Uri): MediaInfo {
+    var name = ""
+    var size = ""
+    var path = uri.toString()
+    var date = ""
+    var duration = ""
+
+    if (uri.scheme == "content") {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val nameIndex = it.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    name = it.getString(nameIndex) ?: "Unknown"
+                }
+
+                val sizeIndex = it.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                if (sizeIndex >= 0) {
+                    val sizeBytes = it.getLong(sizeIndex)
+                    size = formatFileSize(sizeBytes)
+                }
+
+                val dataIndex = it.getColumnIndex(MediaStore.MediaColumns.DATA)
+                if (dataIndex >= 0) {
+                    path = it.getString(dataIndex) ?: path
+                }
+
+                val dateIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                if (dateIndex >= 0) {
+                    val dateModified = it.getLong(dateIndex) * 1000
+                    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                    date = sdf.format(Date(dateModified))
+                }
+
+                val durationIndex = it.getColumnIndex(MediaStore.Video.Media.DURATION)
+                if (durationIndex >= 0) {
+                    val durationMs = it.getLong(durationIndex)
+                    duration = formatTime(durationMs)
+                }
+            }
+        }
+    }
+
+    if (name.isEmpty()) {
+        name = uri.lastPathSegment ?: "Unknown"
+    }
+
+    return MediaInfo(name, size, path, date, duration)
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format("%.2f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format("%.2f MB", mb)
+    val gb = mb / 1024.0
+    return String.format("%.2f GB", gb)
+}
 
 fun adjustAppVolume(context: Context, deltaPercent: Float): Float {
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
     val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-
-    // deltaPercent הוא מספר קטן (למשל 0.05). נכפיל אותו ב-max כדי לדעת כמה לשנות
-    // אבל אנחנו רוצים שינוי איטי. אז נקבע רף מינימלי לשינוי
-
     val change = (deltaPercent * max).toInt()
-    // אם השינוי קטן מדי, לא עושים כלום (כדי למנוע ריצוד)
-    if (change == 0 && abs(deltaPercent) < 0.02) return current.toFloat() / max.toFloat()
-
-    // מוודאים שלפחות יש שינוי של 1 אם הגלילה משמעותית
+    if (change == 0 && abs(deltaPercent) < 0.01) return current.toFloat() / max.toFloat()
     val effectiveChange = if (change == 0) (if (deltaPercent > 0) 1 else -1) else change
-
     val newVol = (current + effectiveChange).coerceIn(0, max)
     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
     return newVol.toFloat() / max.toFloat()
@@ -358,25 +603,48 @@ fun adjustAppBrightness(context: Context, deltaPercent: Float): Float {
     val lp = activity.window.attributes
     var current = lp.screenBrightness
     if (current == -1f) current = 0.5f
-
-    // שינוי הבהירות. deltaPercent הוא השינוי היחסי.
     val newBright = (current + deltaPercent).coerceIn(0.01f, 1f)
-
     lp.screenBrightness = newBright
     activity.window.attributes = lp
     return newBright
 }
 
-fun shareMedia(context: Context, uri: android.net.Uri, isVideo: Boolean) {
+fun shareMedia(context: Context, uri: Uri, isVideo: Boolean) {
     try {
+        val shareUri = if (uri.scheme == "file") {
+            val file = File(uri.path ?: return)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } else {
+            uri
+        }
+
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = if (isVideo) "video/*" else "image/*"
-            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_STREAM, shareUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
+        context.startActivity(Intent.createChooser(shareIntent, "Share"))
     } catch (e: Exception) {
-        // Ignore
+        e.printStackTrace()
+    }
+}
+
+fun openWith(context: Context, uri: Uri, isVideo: Boolean) {
+    try {
+        val openUri = if (uri.scheme == "file") {
+            val file = File(uri.path ?: return)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } else {
+            uri
+        }
+
+        val openIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(openUri, if (isVideo) "video/*" else "image/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(openIntent, "Open with"))
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
 

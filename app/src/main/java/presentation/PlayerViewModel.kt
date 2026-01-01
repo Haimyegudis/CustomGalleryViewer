@@ -24,7 +24,6 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun loadPlaylist(playlistId: Long) {
-        // איפוס לפני טעינה חדשה
         navigationController.resetPlaylist()
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -32,7 +31,6 @@ class PlayerViewModel @Inject constructor(
 
             repository.getMediaFilesFlow(playlistId).collect { batch ->
                 Log.d("PlayerViewModel", "Received batch of ${batch.size} items")
-                // הוספה בטוחה למנוע (ערבוב קל לכל באץ')
                 navigationController.appendItems(batch.shuffled())
             }
         }
