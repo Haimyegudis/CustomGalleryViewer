@@ -26,15 +26,19 @@ class PlayerViewModel @Inject constructor(
     private val _currentMedia = MutableStateFlow<Uri?>(null)
     val currentMedia: StateFlow<Uri?> = _currentMedia.asStateFlow()
 
-    // רשימה לתצוגת הגלריה (ממוינת לפי הגדרות גלריה)
     private val _galleryItems = MutableStateFlow<List<Uri>>(emptyList())
     val galleryItems: StateFlow<List<Uri>> = _galleryItems.asStateFlow()
 
-    // רשימה לניגון (ממוינת לפי הגדרות ניגון - יכול להיות רנדומלי)
     private var _playbackItems: List<Uri> = emptyList()
+    private var originalRawList: List<Uri> = emptyList()
+    private var currentIndex = 0
 
-    private var originalRawList: List<Uri> = emptyList() // המקור
-    private var currentIndex = 0 // האינדקס בתוך playbackItems
+    // מניעת טעינות כפולות
+    private var loadedPlaylistId: Long? = null
+
+    // מניעת מיון מיותר (אם המיון לא השתנה, לא נמיין שוב)
+    private var currentGallerySort: SortOrder? = null
+    private var currentPlaybackSort: SortOrder? = null
 
     private val _isGalleryMode = MutableStateFlow(false)
     val isGalleryMode: StateFlow<Boolean> = _isGalleryMode.asStateFlow()
@@ -43,27 +47,41 @@ class PlayerViewModel @Inject constructor(
     val gridColumns: StateFlow<Int> = _gridColumns.asStateFlow()
 
     init {
-        // האזנה לשינויים בהגדרות המיון
+        // האזנה למיון גלריה
         viewModelScope.launch {
             settingsManager.gallerySortFlow.collectLatest { sort ->
-                updateGalleryList(sort)
+                if (originalRawList.isNotEmpty() && sort != currentGallerySort) {
+                    updateGalleryList(sort)
+                }
             }
         }
+        // האזנה למיון ניגון
         viewModelScope.launch {
             settingsManager.playbackSortFlow.collectLatest { sort ->
-                updatePlaybackList(sort)
+                if (originalRawList.isNotEmpty() && sort != currentPlaybackSort) {
+                    updatePlaybackList(sort)
+                }
             }
         }
     }
 
     fun loadPlaylist(playlistId: Long) {
+        // אם זה אותו פלייליסט, לא טוענים מחדש
+        if (loadedPlaylistId == playlistId && originalRawList.isNotEmpty()) {
+            return
+        }
+
         viewModelScope.launch {
+            loadedPlaylistId = playlistId
+            currentGallerySort = null // איפוס כדי לכפות מיון ראשוני
+            currentPlaybackSort = null
+
             val tempRaw = mutableListOf<Uri>()
             repository.getMediaFilesFlow(playlistId).collect { batch ->
                 tempRaw.addAll(batch)
                 originalRawList = ArrayList(tempRaw)
 
-                // עדכון שתי הרשימות
+                // ביצוע מיון ראשוני
                 updateGalleryList(settingsManager.getGallerySort())
                 updatePlaybackList(settingsManager.getPlaybackSort())
 
@@ -77,16 +95,17 @@ class PlayerViewModel @Inject constructor(
 
     private suspend fun updateGalleryList(order: SortOrder) {
         if (originalRawList.isEmpty()) return
+        currentGallerySort = order // עדכון המיון הנוכחי
         val sorted = sortList(originalRawList, order)
         _galleryItems.value = sorted
     }
 
     private suspend fun updatePlaybackList(order: SortOrder) {
         if (originalRawList.isEmpty()) return
+        currentPlaybackSort = order // עדכון המיון הנוכחי
         val sorted = sortList(originalRawList, order)
         _playbackItems = sorted
 
-        // עדכון האינדקס כדי לשמור על התמונה הנוכחית ברשימה החדשה
         val current = _currentMedia.value
         if (current != null) {
             val newIndex = _playbackItems.indexOf(current)
@@ -118,9 +137,7 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    // כשלוחצים על תמונה בגלריה (אנחנו מקבלים URI כי המיקום בגלריה לא תואם למיקום בניגון)
     fun jumpToItem(uri: Uri) {
-        // מציאת המיקום של התמונה ברשימת הניגון
         val indexInPlayback = _playbackItems.indexOf(uri)
         if (indexInPlayback != -1) {
             currentIndex = indexInPlayback
