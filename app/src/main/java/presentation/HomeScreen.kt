@@ -1,5 +1,6 @@
 package com.example.customgalleryviewer.presentation
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,10 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -20,8 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
 import com.example.customgalleryviewer.data.PlaylistWithItems
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -30,7 +33,7 @@ fun HomeScreen(
     onNavigateToPlayer: (Long) -> Unit,
     onNavigateToAdd: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToEdit: (Long) -> Unit, // הוספתי פרמטר לעריכה
+    onNavigateToEdit: (Long) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val playlists by viewModel.playlists.collectAsState()
@@ -62,7 +65,26 @@ fun HomeScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No playlists yet. Tap + to add one.")
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.PhotoLibrary,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "No playlists yet",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Tap + to create your first playlist",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         } else {
             LazyColumn(
@@ -92,6 +114,8 @@ fun PlaylistCard(
     onDelete: () -> Unit,
     onEdit: () -> Unit
 ) {
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -105,19 +129,35 @@ fun PlaylistCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // אייקון עגול עם האות הראשונה
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = item.playlist.name.take(1).uppercase(),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onPrimary
+            // תמונת Thumbnail או אייקון ברירת מחדל
+            if (item.playlist.thumbnailUri != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(item.playlist.thumbnailUri))
+                        .decoderFactory(VideoFrameDecoder.Factory())
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
                 )
+            } else {
+                // אין thumbnail - הצג את האות הראשונה
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = item.playlist.name.take(1).uppercase(),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -128,7 +168,7 @@ fun PlaylistCard(
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
-                    text = "${item.items.size} items • ${item.playlist.mediaFilterType.name}",
+                    text = "${item.items.size} items • ${item.playlist.mediaFilterType.name.replace("_", " ")}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -136,12 +176,20 @@ fun PlaylistCard(
 
             // כפתור עריכה
             IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = MaterialTheme.colorScheme.primary
+                )
             }
 
             // כפתור מחיקה
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
         }
     }

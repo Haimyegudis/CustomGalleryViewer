@@ -203,6 +203,7 @@ fun PlayerContentView(
                     uri = uri,
                     onNext = onNext,
                     onPrev = onPrev,
+                    navigationMode = navigationMode,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -226,17 +227,24 @@ fun PlayerContentView(
                                 }
                             }
                         }
-                        .pointerInput(navigationMode, scale) {
+                        // SWIPE רק כשהמסך לא מוגדל
+                        .then(
                             if (navigationMode == "SWIPE" && scale == 1f) {
-                                detectHorizontalDragGestures { _, dragAmount ->
-                                    // תיקון: הפוך את הכיוון!
-                                    // swipe left (dragAmount < 0) = previous
-                                    // swipe right (dragAmount > 0) = next
-                                    if (dragAmount < -50) onPrev()
-                                    else if (dragAmount > 50) onNext()
+                                Modifier.pointerInput(Unit) {
+                                    detectHorizontalDragGestures { _, dragAmount ->
+                                        // swipe מימין לשמאל (dragAmount שלילי) = הבא
+                                        // swipe משמאל לימין (dragAmount חיובי) = הקודם
+                                        if (dragAmount < -50) {
+                                            onNext()
+                                        } else if (dragAmount > 50) {
+                                            onPrev()
+                                        }
+                                    }
                                 }
+                            } else {
+                                Modifier
                             }
-                        }
+                        )
                 ) {
                     AsyncImage(
                         model = uri,
@@ -252,26 +260,60 @@ fun PlayerContentView(
                         contentScale = ContentScale.Fit
                     )
 
-                    if (scale == 1f) {
+                    // אזורי TAP רק במצב TAP וכשהתמונה לא מוגדלת
+                    if (navigationMode == "TAP" && scale == 1f) {
                         Row(modifier = Modifier.fillMaxSize()) {
-                            Box(modifier = Modifier.weight(0.3f).fillMaxHeight().pointerInput(navigationMode) {
-                                detectTapGestures(onTap = { if (navigationMode == "TAP") onPrev() }, onLongPress = { showActionMenu = true })
-                            })
-                            Box(modifier = Modifier.weight(0.4f).fillMaxHeight().pointerInput(Unit) {
-                                detectTapGestures(onLongPress = { showActionMenu = true })
-                            })
-                            Box(modifier = Modifier.weight(0.3f).fillMaxHeight().pointerInput(navigationMode) {
-                                detectTapGestures(onTap = { if (navigationMode == "TAP") onNext() }, onLongPress = { showActionMenu = true })
-                            })
+                            Box(
+                                modifier = Modifier
+                                    .weight(0.3f)
+                                    .fillMaxHeight()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { onPrev() },
+                                            onLongPress = { showActionMenu = true }
+                                        )
+                                    }
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(0.4f)
+                                    .fillMaxHeight()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onLongPress = { showActionMenu = true }
+                                        )
+                                    }
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(0.3f)
+                                    .fillMaxHeight()
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { onNext() },
+                                            onLongPress = { showActionMenu = true }
+                                        )
+                                    }
+                            )
                         }
                     }
 
-                    if (showActionMenu) ActionMenuDialog(uri = uri, isVideo = false, onDismiss = { showActionMenu = false })
+                    if (showActionMenu) {
+                        ActionMenuDialog(
+                            uri = uri,
+                            isVideo = false,
+                            onDismiss = { showActionMenu = false }
+                        )
+                    }
                 }
             }
+
             IconButton(
                 onClick = onToggleGallery,
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp, end = 48.dp).background(Color.Black.copy(0.5f), MaterialTheme.shapes.small)
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp, end = 48.dp)
+                    .background(Color.Black.copy(0.5f), MaterialTheme.shapes.small)
             ) {
                 Icon(Icons.Default.GridView, "Gallery", tint = Color.White)
             }

@@ -16,5 +16,8 @@ data class PlaylistEntity(
     val startVideoMuted: Boolean = true,
     val autoRotateVideo: Boolean = true,
 
-    val mediaFilterType: MediaFilterType = MediaFilterType.MIXED
+    val mediaFilterType: MediaFilterType = MediaFilterType.MIXED,
+
+    // תמונת ייצוג - התמונה/ווידאו האחרון שנוסף
+    val thumbnailUri: String? = null
 )

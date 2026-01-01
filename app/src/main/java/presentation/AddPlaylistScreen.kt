@@ -34,7 +34,6 @@ fun AddPlaylistScreen(
 ) {
     var playlistName by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(MediaFilterType.MIXED) }
-    // שימוש ב-SnapshotStateList לעדכון מידי של הממשק
     val selectedItems = remember { mutableStateListOf<Pair<Uri, ItemType>>() }
     val context = LocalContext.current
     var isProcessing by remember { mutableStateOf(false) }
@@ -44,35 +43,46 @@ fun AddPlaylistScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            // הוספת הרשאה מתמשכת לקובץ (חשוב לגישה עתידית)
+            isProcessing = true
             try {
                 context.contentResolver.takePersistableUriPermission(
                     it,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
+                selectedItems.add(it to ItemType.FILE)
+                Toast.makeText(context, "File added", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 e.printStackTrace()
+                Toast.makeText(context, "Error adding file", Toast.LENGTH_SHORT).show()
+            } finally {
+                isProcessing = false
             }
-            selectedItems.add(it to ItemType.FILE)
+        } ?: run {
+            isProcessing = false
         }
     }
 
     // --- Launcher לתיקיות (Folder Picker - USB Support) ---
-    // זה פותר את הבעיה: משתמשים בבוחר המערכת שתומך ב-USB
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let {
+            isProcessing = true
             try {
-                // הוספת הרשאה מתמשכת לתיקייה
                 context.contentResolver.takePersistableUriPermission(
                     it,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
+                selectedItems.add(it to ItemType.FOLDER)
+                Toast.makeText(context, "Folder added successfully", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 e.printStackTrace()
+                Toast.makeText(context, "Error adding folder", Toast.LENGTH_SHORT).show()
+            } finally {
+                isProcessing = false
             }
-            selectedItems.add(it to ItemType.FOLDER)
+        } ?: run {
+            isProcessing = false
         }
     }
 
@@ -106,8 +116,20 @@ fun AddPlaylistScreen(
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     enabled = !isProcessing
                 ) {
-                    if (isProcessing) CircularProgressIndicator(color = Color.White)
-                    else Text("Create Playlist")
+                    if (isProcessing) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text("Processing...")
+                        }
+                    } else {
+                        Text("Create Playlist")
+                    }
                 }
             }
         }
@@ -125,7 +147,8 @@ fun AddPlaylistScreen(
                 onValueChange = { playlistName = it },
                 label = { Text("Playlist Name") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                enabled = !isProcessing
             )
 
             // בחירת סוג מדיה (פילטר)
@@ -139,7 +162,8 @@ fun AddPlaylistScreen(
                         selected = selectedFilter == type,
                         onClick = { selectedFilter = type },
                         label = { Text(label) },
-                        leadingIcon = if (selectedFilter == type) { { Icon(Icons.Default.Check, null) } } else null
+                        leadingIcon = if (selectedFilter == type) { { Icon(Icons.Default.Check, null) } } else null,
+                        enabled = !isProcessing
                     )
                 }
             }
@@ -148,33 +172,35 @@ fun AddPlaylistScreen(
 
             // כפתורי הוספה
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                // כפתור בחירת תיקייה (עכשיו תומך ב-USB דרך המערכת)
                 BigActionButton(
                     icon = Icons.Default.FolderOpen,
                     text = "Select Folder",
                     modifier = Modifier.weight(1f),
-                    onClick = { folderPickerLauncher.launch(null) }
+                    onClick = { folderPickerLauncher.launch(null) },
+                    enabled = !isProcessing
                 )
-                // כפתור בחירת קובץ
                 BigActionButton(
                     icon = Icons.Default.InsertDriveFile,
                     text = "Select File",
                     modifier = Modifier.weight(1f),
-                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
+                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                    enabled = !isProcessing
                 )
             }
 
             // רשימת הפריטים שנבחרו
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(selectedItems) { (uri, type) ->
-                    SelectedItemCard(uri, type) { selectedItems.remove(uri to type) }
+                    SelectedItemCard(uri, type) {
+                        if (!isProcessing) {
+                            selectedItems.remove(uri to type)
+                        }
+                    }
                 }
             }
         }
     }
 }
-
-// --- כרטיסיות עיצוב ---
 
 @Composable
 fun SelectedItemCard(uri: Uri, type: ItemType, onRemove: () -> Unit) {
@@ -192,7 +218,6 @@ fun SelectedItemCard(uri: Uri, type: ItemType, onRemove: () -> Unit) {
                 null, tint = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.width(12.dp))
-            // ניסיון להציג שם קריא מה-URI
             val displayName = uri.path?.split("/")?.lastOrNull()?.replace("primary:", "") ?: "Selected Item"
             Text(
                 displayName,
@@ -207,18 +232,41 @@ fun SelectedItemCard(uri: Uri, type: ItemType, onRemove: () -> Unit) {
 }
 
 @Composable
-fun BigActionButton(icon: ImageVector, text: String, modifier: Modifier, onClick: () -> Unit) {
+fun BigActionButton(
+    icon: ImageVector,
+    text: String,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
     Column(
         modifier = modifier
             .height(80.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .border(
+                1.dp,
+                if (enabled) MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                RoundedCornerShape(12.dp)
+            )
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-            .background(MaterialTheme.colorScheme.surface),
+            .clickable(enabled = enabled) { onClick() }
+            .background(
+                if (enabled) MaterialTheme.colorScheme.surface
+                else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-        Text(text)
+        Icon(
+            icon,
+            null,
+            tint = if (enabled) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        )
+        Text(
+            text,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+        )
     }
 }

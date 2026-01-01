@@ -7,7 +7,6 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 
-// המחלקה שהייתה חסרה וגרמה לקריסה
 data class PlaylistWithItems(
     @Embedded val playlist: PlaylistEntity,
     @Relation(
@@ -29,8 +28,11 @@ class Converters {
     fun toItemType(value: String) = ItemType.valueOf(value)
 }
 
-// הגדרת המסד - ללא ה-Interface בתוכו (כי הוא בקובץ נפרד)
-@Database(entities = [PlaylistEntity::class, PlaylistItemEntity::class], version = 1, exportSchema = false)
+@Database(
+    entities = [PlaylistEntity::class, PlaylistItemEntity::class],
+    version = 2,  // שינוי version בגלל שדה חדש
+    exportSchema = false
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
