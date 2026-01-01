@@ -13,32 +13,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.customgalleryviewer.data.Playlist
+import com.example.customgalleryviewer.data.PlaylistEntity
+import com.example.customgalleryviewer.data.PlaylistWithItems
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    onPlaylistClick: (Long) -> Unit,
-    onEditPlaylist: (Long) -> Unit,
-    onSettingsClick: () -> Unit,
+    onNavigateToPlayer: (Long) -> Unit,
+    onNavigateToAdd: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val playlists by viewModel.playlists.collectAsState()
-    var showCreateDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Gallery Playlists") },
                 actions = {
-                    IconButton(onClick = onSettingsClick) {
+                    IconButton(onClick = { /* TODO: Settings */ }) {
                         Icon(Icons.Default.Settings, "Settings")
                     }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreateDialog = true }) {
+            FloatingActionButton(onClick = onNavigateToAdd) {
                 Icon(Icons.Default.Add, "Create Playlist")
             }
         }
@@ -77,33 +76,23 @@ fun HomeScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(playlists, key = { it.id }) { playlist ->
+                items(playlists, key = { it.playlist.id }) { playlistWithItems ->
                     PlaylistCard(
-                        playlist = playlist,
-                        onClick = { onPlaylistClick(playlist.id) },
-                        onLongClick = { onEditPlaylist(playlist.id) },
-                        onDelete = { viewModel.deletePlaylist(playlist) }
+                        playlistWithItems = playlistWithItems,
+                        onClick = { onNavigateToPlayer(playlistWithItems.playlist.id) },
+                        onLongClick = { /* TODO: Edit */ },
+                        onDelete = { viewModel.deletePlaylist(playlistWithItems.playlist) }
                     )
                 }
             }
         }
-    }
-
-    if (showCreateDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { showCreateDialog = false },
-            onCreate = { name ->
-                viewModel.createPlaylist(name)
-                showCreateDialog = false
-            }
-        )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistCard(
-    playlist: Playlist,
+    playlistWithItems: PlaylistWithItems,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onDelete: () -> Unit
@@ -128,11 +117,11 @@ fun PlaylistCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = playlist.name,
+                    text = playlistWithItems.playlist.name,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
-                    text = "${playlist.uriStrings.size} items",
+                    text = "${playlistWithItems.items.size} items",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -152,7 +141,7 @@ fun PlaylistCard(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete Playlist") },
-            text = { Text("Are you sure you want to delete '${playlist.name}'?") },
+            text = { Text("Are you sure you want to delete '${playlistWithItems.playlist.name}'?") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -170,38 +159,4 @@ fun PlaylistCard(
             }
         )
     }
-}
-
-@Composable
-fun CreatePlaylistDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit
-) {
-    var playlistName by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Playlist") },
-        text = {
-            OutlinedTextField(
-                value = playlistName,
-                onValueChange = { playlistName = it },
-                label = { Text("Playlist Name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (playlistName.isNotBlank()) onCreate(playlistName) },
-                enabled = playlistName.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }

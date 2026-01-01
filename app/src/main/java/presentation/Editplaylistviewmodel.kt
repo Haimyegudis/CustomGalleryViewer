@@ -5,8 +5,9 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.customgalleryviewer.data.Playlist
+import com.example.customgalleryviewer.data.ItemType
 import com.example.customgalleryviewer.data.PlaylistDao
+import com.example.customgalleryviewer.data.PlaylistItemEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,10 +33,10 @@ class EditPlaylistViewModel @Inject constructor(
     fun loadPlaylist(playlistId: Long) {
         currentPlaylistId = playlistId
         viewModelScope.launch {
-            val playlist = playlistDao.getPlaylistById(playlistId)
-            playlist?.let {
-                _playlistName.value = it.name
-                _items.value = it.uriStrings.map { uriStr -> Uri.parse(uriStr) }
+            val playlistWithItems = playlistDao.getPlaylistWithItems(playlistId)
+            playlistWithItems?.let {
+                _playlistName.value = it.playlist.name
+                _items.value = it.items.map { item -> Uri.parse(item.uriString) }
             }
         }
     }
@@ -43,10 +44,14 @@ class EditPlaylistViewModel @Inject constructor(
     fun addItems(uris: List<Uri>) {
         val currentItems = _items.value.toMutableList()
         uris.forEach { uri ->
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // Some URIs might not support persistent permissions
+            }
             if (uri !in currentItems) {
                 currentItems.add(uri)
             }
@@ -109,12 +114,22 @@ class EditPlaylistViewModel @Inject constructor(
 
     fun savePlaylist() {
         viewModelScope.launch {
-            val playlist = playlistDao.getPlaylistById(currentPlaylistId)
-            playlist?.let {
-                val updatedPlaylist = it.copy(
-                    uriStrings = _items.value.map { uri -> uri.toString() }
-                )
-                playlistDao.update(updatedPlaylist)
+            val playlistWithItems = playlistDao.getPlaylistWithItems(currentPlaylistId)
+            playlistWithItems?.let {
+                // Delete old items
+                playlistDao.deleteItemsByPlaylistId(currentPlaylistId)
+
+                // Create new items
+                val newItems = _items.value.map { uri ->
+                    PlaylistItemEntity(
+                        playlistId = currentPlaylistId,
+                        uriString = uri.toString(),
+                        type = ItemType.FILE,
+                        isRecursive = false
+                    )
+                }
+
+                playlistDao.insertItems(newItems)
             }
         }
     }

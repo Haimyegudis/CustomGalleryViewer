@@ -11,6 +11,7 @@ import androidx.room.Relation
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.TypeConverter
+import androidx.room.Update
 
 data class PlaylistWithItems(
     @Embedded val playlist: PlaylistEntity,
@@ -54,6 +55,12 @@ interface PlaylistDao {
 
     @Delete
     suspend fun deleteItem(item: PlaylistItemEntity)
+
+    @Update
+    suspend fun updatePlaylist(playlist: PlaylistEntity)
+
+    @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId")
+    suspend fun deleteItemsByPlaylistId(playlistId: Long)
 }
 
 @Database(entities = [PlaylistEntity::class, PlaylistItemEntity::class], version = 1)

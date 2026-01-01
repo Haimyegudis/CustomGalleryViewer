@@ -32,7 +32,7 @@ class HomeViewModel @Inject constructor(
     fun deletePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch {
             playlistDao.deletePlaylist(playlist)
-            loadPlaylists() // רענון
+            loadPlaylists()
         }
     }
 }

@@ -13,8 +13,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.customgalleryviewer.presentation.AddPlaylistScreen
+import com.example.customgalleryviewer.presentation.EditPlaylistScreen
 import com.example.customgalleryviewer.presentation.HomeScreen
 import com.example.customgalleryviewer.presentation.PlayerScreen
+import com.example.customgalleryviewer.presentation.SettingsScreen
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -53,6 +55,25 @@ class MainActivity : ComponentActivity() {
                         ) { backStackEntry ->
                             val playlistId = backStackEntry.arguments?.getLong("playlistId") ?: -1L
                             PlayerScreen(playlistId = playlistId)
+                        }
+
+                        // 4. עריכת פלייליסט
+                        composable(
+                            route = "edit_playlist/{playlistId}",
+                            arguments = listOf(navArgument("playlistId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val playlistId = backStackEntry.arguments?.getLong("playlistId") ?: -1L
+                            EditPlaylistScreen(
+                                playlistId = playlistId,
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        }
+
+                        // 5. הגדרות
+                        composable("settings") {
+                            SettingsScreen(
+                                onBackClick = { navController.popBackStack() }
+                            )
                         }
                     }
                 }
