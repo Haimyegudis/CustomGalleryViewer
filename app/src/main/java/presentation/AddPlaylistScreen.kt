@@ -1,9 +1,7 @@
 package com.example.customgalleryviewer.presentation
 
 import android.net.Uri
-import android.os.Environment
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -12,7 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,15 +21,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.customgalleryviewer.data.ItemType
 import com.example.customgalleryviewer.data.MediaFilterType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,19 +34,45 @@ fun AddPlaylistScreen(
 ) {
     var playlistName by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(MediaFilterType.MIXED) }
+    // שימוש ב-SnapshotStateList לעדכון מידי של הממשק
     val selectedItems = remember { mutableStateListOf<Pair<Uri, ItemType>>() }
     val context = LocalContext.current
-
-    // מצבים לניהול ה-UI
-    var showInternalFolderPicker by remember { mutableStateOf(false) }
     var isProcessing by remember { mutableStateOf(false) }
 
-    // --- Launcher לקבצים בודדים (עדיין נשתמש במערכת לקבצים בודדים) ---
+    // --- Launcher לקבצים (File Picker) ---
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
+            // הוספת הרשאה מתמשכת לקובץ (חשוב לגישה עתידית)
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             selectedItems.add(it to ItemType.FILE)
+        }
+    }
+
+    // --- Launcher לתיקיות (Folder Picker - USB Support) ---
+    // זה פותר את הבעיה: משתמשים בבוחר המערכת שתומך ב-USB
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            try {
+                // הוספת הרשאה מתמשכת לתיקייה
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            selectedItems.add(it to ItemType.FOLDER)
         }
     }
 
@@ -70,18 +88,6 @@ fun AddPlaylistScreen(
                 onBack()
             }
         }
-    }
-
-    // אם בוחר התיקיות הפנימי פתוח - מציגים אותו על כל המסך
-    if (showInternalFolderPicker) {
-        InternalFolderPicker(
-            onFolderSelected = { file ->
-                selectedItems.add(Uri.fromFile(file) to ItemType.FOLDER)
-                showInternalFolderPicker = false
-            },
-            onCancel = { showInternalFolderPicker = false }
-        )
-        return // יוצאים מהפונקציה כדי לא לצייר את שאר המסך מתחת
     }
 
     Scaffold(
@@ -113,7 +119,7 @@ fun AddPlaylistScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // שם
+            // שם הפלייליסט
             OutlinedTextField(
                 value = playlistName,
                 onValueChange = { playlistName = it },
@@ -122,7 +128,7 @@ fun AddPlaylistScreen(
                 singleLine = true
             )
 
-            // פילטר
+            // בחירת סוג מדיה (פילטר)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
                     "Mixed" to MediaFilterType.MIXED,
@@ -142,14 +148,14 @@ fun AddPlaylistScreen(
 
             // כפתורי הוספה
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                // כפתור תיקייה - פותח את הבוחר הפנימי שלנו
+                // כפתור בחירת תיקייה (עכשיו תומך ב-USB דרך המערכת)
                 BigActionButton(
                     icon = Icons.Default.FolderOpen,
                     text = "Select Folder",
                     modifier = Modifier.weight(1f),
-                    onClick = { showInternalFolderPicker = true }
+                    onClick = { folderPickerLauncher.launch(null) }
                 )
-                // כפתור קובץ - פותח את הבוחר של המערכת
+                // כפתור בחירת קובץ
                 BigActionButton(
                     icon = Icons.Default.InsertDriveFile,
                     text = "Select File",
@@ -158,94 +164,11 @@ fun AddPlaylistScreen(
                 )
             }
 
-            // רשימה
+            // רשימת הפריטים שנבחרו
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(selectedItems) { (uri, type) ->
                     SelectedItemCard(uri, type) { selectedItems.remove(uri to type) }
                 }
-            }
-        }
-    }
-}
-
-// --- רכיב בוחר תיקיות פנימי (כמו במחשב) ---
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun InternalFolderPicker(
-    onFolderSelected: (File) -> Unit,
-    onCancel: () -> Unit
-) {
-    // מתחילים מהתיקייה הראשית של הטלפון
-    var currentPath by remember { mutableStateOf(Environment.getExternalStorageDirectory()) }
-    val files = remember(currentPath) {
-        // מציג רק תיקיות, מסנן קבצים, וממיין לפי א-ב
-        currentPath.listFiles()
-            ?.filter { it.isDirectory && !it.isHidden }
-            ?.sortedBy { it.name.lowercase() }
-            ?: emptyList()
-    }
-
-    // טיפול בכפתור "חזור" של הטלפון
-    BackHandler {
-        if (currentPath == Environment.getExternalStorageDirectory()) {
-            onCancel()
-        } else {
-            currentPath = currentPath.parentFile ?: currentPath
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(currentPath.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        if (currentPath == Environment.getExternalStorageDirectory()) onCancel()
-                        else currentPath = currentPath.parentFile ?: currentPath
-                    }) {
-                        Icon(Icons.Default.ArrowBack, null)
-                    }
-                }
-            )
-        },
-        bottomBar = {
-            Button(
-                onClick = { onFolderSelected(currentPath) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .height(56.dp)
-            ) {
-                Text("Select This Folder")
-            }
-        }
-    ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
-            if (files.isEmpty()) {
-                item {
-                    Text(
-                        "Empty Folder",
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color.Gray
-                    )
-                }
-            }
-            items(files) { file ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { currentPath = file } // נכנס לתיקייה בלחיצה
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.secondary)
-                    Spacer(Modifier.width(16.dp))
-                    Text(file.name, style = MaterialTheme.typography.bodyLarge)
-                }
-                Divider(color = Color.LightGray.copy(alpha = 0.3f))
             }
         }
     }
@@ -269,8 +192,10 @@ fun SelectedItemCard(uri: Uri, type: ItemType, onRemove: () -> Unit) {
                 null, tint = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.width(12.dp))
+            // ניסיון להציג שם קריא מה-URI
+            val displayName = uri.path?.split("/")?.lastOrNull()?.replace("primary:", "") ?: "Selected Item"
             Text(
-                uri.path?.split("/")?.lastOrNull() ?: "Unknown",
+                displayName,
                 modifier = Modifier.weight(1f),
                 maxLines = 1
             )

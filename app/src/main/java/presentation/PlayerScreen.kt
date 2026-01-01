@@ -39,8 +39,6 @@ import coil.request.ImageRequest
 import com.example.customgalleryviewer.presentation.components.ActionMenuDialog
 import com.example.customgalleryviewer.presentation.components.VideoPlayer
 import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
 
 @Composable
 fun PlayerScreen(
@@ -103,79 +101,77 @@ fun GalleryGridView(
     onColumnsChange: (Int) -> Unit,
     onBackToPlayer: () -> Unit
 ) {
-    // משתנה צבירה לזום בגלריה
-    var accumulatedZoom by remember { mutableFloatStateOf(1f) }
-
-    // תיקון 1: העברת זיהוי המחווה לרמת ה-Column הראשי כדי לתפוס בכל המסך
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    accumulatedZoom *= zoom
-                    // תיקון 1 (המשך): הגברת רגישות. שינוי של 5% מספיק כדי לעורר פעולה.
-                    if (accumulatedZoom > 1.05f) { // Zoom In -> פחות עמודות (תמונות גדולות יותר)
-                        if (columns > 2) {
-                            onColumnsChange(columns - 1)
-                            accumulatedZoom = 1f // איפוס לאחר שינוי
-                        }
-                    } else if (accumulatedZoom < 0.95f) { // Zoom Out -> יותר עמודות (תמונות קטנות יותר)
-                        if (columns < 8) {
-                            onColumnsChange(columns + 1)
-                            accumulatedZoom = 1f // איפוס לאחר שינוי
-                        }
-                    }
-                }
-            }
-    ) {
+    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // שורה עליונה עם כפתור חזרה וסליידר
         Row(
-            modifier = Modifier.fillMaxWidth().background(Color.Black.copy(0.8f)).padding(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.Black.copy(0.8f))
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBackToPlayer) { Icon(Icons.Default.ArrowBack, "Back", tint = Color.White) }
+            IconButton(onClick = onBackToPlayer) {
+                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+            }
             Text("Gallery", color = Color.White, modifier = Modifier.padding(start = 8.dp))
+
+            Spacer(Modifier.weight(1f))
+
+            // הסליידר חזר!
+            Text("Size", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
+            Slider(
+                value = columns.toFloat(),
+                onValueChange = { onColumnsChange(it.toInt()) },
+                valueRange = 2f..8f,
+                steps = 5, // מדרגות כדי להקל על הבחירה
+                modifier = Modifier.width(150.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = Color.White.copy(0.5f)
+                )
+            )
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(2.dp)
-            ) {
-                items(items) { uri ->
-                    val isSelected = uri == currentUri
-                    val isVideo = isVideo(uri.toString())
-                    val context = LocalContext.current
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(2.dp)
+        ) {
+            items(items) { uri ->
+                val isSelected = uri == currentUri
+                val isVideo = isVideo(uri.toString())
+                val context = LocalContext.current
 
-                    Box(
-                        modifier = Modifier
-                            .padding(1.dp)
-                            .aspectRatio(1f)
-                            .border(if (isSelected) 3.dp else 0.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
-                            .clickable { onItemClick(uri) }
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(uri)
-                                .decoderFactory(VideoFrameDecoder.Factory())
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                            error = ColorPainter(Color.DarkGray)
+                Box(
+                    modifier = Modifier
+                        .padding(1.dp)
+                        .aspectRatio(1f)
+                        .border(
+                            if (isSelected) 3.dp else 0.dp,
+                            if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
                         )
-                        if (isVideo) {
-                            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)))
-                            // תיקון 2: הקטנת גודל כפתור ה-Play
-                            Icon(
-                                imageVector = Icons.Default.PlayCircle,
-                                contentDescription = null,
-                                tint = Color.White.copy(0.9f),
-                                modifier = Modifier.align(Alignment.Center).size(24.dp) // שונה מ-36dp ל-24dp
-                            )
-                        }
+                        .clickable { onItemClick(uri) }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(uri)
+                            .decoderFactory(VideoFrameDecoder.Factory())
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        error = ColorPainter(Color.DarkGray)
+                    )
+                    if (isVideo) {
+                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)))
+                        Icon(
+                            imageVector = Icons.Default.PlayCircle,
+                            contentDescription = null,
+                            tint = Color.White.copy(0.9f),
+                            modifier = Modifier.align(Alignment.Center).size(24.dp)
+                        )
                     }
                 }
             }
@@ -195,7 +191,6 @@ fun PlayerContentView(
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    // איפוס זום במעבר תמונה
     LaunchedEffect(currentMedia) {
         scale = 1f
         offset = Offset.Zero
@@ -203,21 +198,24 @@ fun PlayerContentView(
 
     Box(modifier = Modifier.fillMaxSize()) {
         currentMedia?.let { uri ->
-            if (isVideo(uri.toString())) {
-                VideoPlayer(uri = uri, onNext = onNext, onPrev = onPrev, modifier = Modifier.fillMaxSize())
+            val isVideoFile = isVideo(uri.toString())
+
+            if (isVideoFile) {
+                VideoPlayer(
+                    uri = uri,
+                    onNext = onNext,
+                    onPrev = onPrev,
+                    modifier = Modifier.fillMaxSize()
+                )
             } else {
-                // תצוגת תמונה עם זום וגרירה
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .clipToBounds()
                         .pointerInput(Unit) {
                             detectTransformGestures { _, pan, zoom, _ ->
-                                // חישוב זום עם גבולות
                                 val newScale = (scale * zoom).coerceIn(1f, 4f)
                                 scale = newScale
-
-                                // חישוב גרירה (רק אם בזום)
                                 if (scale > 1f) {
                                     val maxTranslateX = (size.width * (scale - 1)) / 2
                                     val maxTranslateY = (size.height * (scale - 1)) / 2
@@ -230,7 +228,6 @@ fun PlayerContentView(
                                 }
                             }
                         }
-                        // Swipe Navigation - עובד רק כשאין זום (scale == 1)
                         .pointerInput(navigationMode, scale) {
                             if (navigationMode == "SWIPE" && scale == 1f) {
                                 detectHorizontalDragGestures { _, dragAmount ->
@@ -254,7 +251,6 @@ fun PlayerContentView(
                         contentScale = ContentScale.Fit
                     )
 
-                    // Tap Navigation Zones (רק אם TAP מופעל ואין זום)
                     if (scale == 1f) {
                         Row(modifier = Modifier.fillMaxSize()) {
                             Box(modifier = Modifier.weight(0.3f).fillMaxHeight().pointerInput(navigationMode) {
