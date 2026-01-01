@@ -1,6 +1,7 @@
 package com.example.customgalleryviewer.presentation
 
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.customgalleryviewer.data.SettingsManager
@@ -30,13 +31,14 @@ class PlayerViewModel @Inject constructor(
     val galleryItems: StateFlow<List<Uri>> = _galleryItems.asStateFlow()
 
     private var _playbackItems: List<Uri> = emptyList()
-    private var originalRawList: List<Uri> = emptyList()
+
+    // תיקון: שימוש ב-LinkedHashSet כדי למנוע כפילויות אבל לשמור סדר
+    private val originalRawSet = LinkedHashSet<Uri>()
+
     private var currentIndex = 0
 
-    // מניעת טעינות כפולות
     private var loadedPlaylistId: Long? = null
 
-    // מניעת מיון מיותר (אם המיון לא השתנה, לא נמיין שוב)
     private var currentGallerySort: SortOrder? = null
     private var currentPlaybackSort: SortOrder? = null
 
@@ -47,18 +49,16 @@ class PlayerViewModel @Inject constructor(
     val gridColumns: StateFlow<Int> = _gridColumns.asStateFlow()
 
     init {
-        // האזנה למיון גלריה
         viewModelScope.launch {
             settingsManager.gallerySortFlow.collectLatest { sort ->
-                if (originalRawList.isNotEmpty() && sort != currentGallerySort) {
+                if (originalRawSet.isNotEmpty() && sort != currentGallerySort) {
                     updateGalleryList(sort)
                 }
             }
         }
-        // האזנה למיון ניגון
         viewModelScope.launch {
             settingsManager.playbackSortFlow.collectLatest { sort ->
-                if (originalRawList.isNotEmpty() && sort != currentPlaybackSort) {
+                if (originalRawSet.isNotEmpty() && sort != currentPlaybackSort) {
                     updatePlaybackList(sort)
                 }
             }
@@ -66,44 +66,64 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun loadPlaylist(playlistId: Long) {
-        // אם זה אותו פלייליסט, לא טוענים מחדש
-        if (loadedPlaylistId == playlistId && originalRawList.isNotEmpty()) {
+        if (loadedPlaylistId == playlistId && originalRawSet.isNotEmpty()) {
             return
         }
 
         viewModelScope.launch {
             loadedPlaylistId = playlistId
-            currentGallerySort = null // איפוס כדי לכפות מיון ראשוני
+            currentGallerySort = null
             currentPlaybackSort = null
 
-            val tempRaw = mutableListOf<Uri>()
-            repository.getMediaFilesFlow(playlistId).collect { batch ->
-                tempRaw.addAll(batch)
-                originalRawList = ArrayList(tempRaw)
+            // תיקון: ניקוי ה-Set לפני טעינה חדשה
+            originalRawSet.clear()
 
-                // ביצוע מיון ראשוני
+            Log.d("PlayerViewModel", "=== Starting playlist load: $playlistId ===")
+
+            // תיקון: שימוש ב-collect במקום collectLatest כדי לא לאבד באצ'ים
+            repository.getMediaFilesFlow(playlistId).collect { batch ->
+                Log.d("PlayerViewModel", "Received batch: ${batch.size} files")
+
+                // תיקון: הוספה ל-Set מונעת כפילויות אוטומטית
+                val sizeBefore = originalRawSet.size
+                originalRawSet.addAll(batch)
+                val sizeAfter = originalRawSet.size
+
+                Log.d("PlayerViewModel", "Added ${sizeAfter - sizeBefore} new files (total: $sizeAfter)")
+
+                // עדכון מיידי של הגלריה והפלייבק
                 updateGalleryList(settingsManager.getGallerySort())
                 updatePlaybackList(settingsManager.getPlaybackSort())
 
+                // התחלת ניגון אם עדיין לא התחלנו
                 if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
                     currentIndex = 0
                     _currentMedia.value = _playbackItems[0]
+                    Log.d("PlayerViewModel", "Started playback with first item")
                 }
             }
+
+            Log.d("PlayerViewModel", "=== Playlist load complete: ${originalRawSet.size} total files ===")
         }
     }
 
     private suspend fun updateGalleryList(order: SortOrder) {
-        if (originalRawList.isEmpty()) return
-        currentGallerySort = order // עדכון המיון הנוכחי
-        val sorted = sortList(originalRawList, order)
+        if (originalRawSet.isEmpty()) return
+        currentGallerySort = order
+
+        // תיקון: המרת Set ל-List רק פעם אחת
+        val sorted = sortList(originalRawSet.toList(), order)
         _galleryItems.value = sorted
+
+        Log.d("PlayerViewModel", "Gallery updated: ${sorted.size} items")
     }
 
     private suspend fun updatePlaybackList(order: SortOrder) {
-        if (originalRawList.isEmpty()) return
-        currentPlaybackSort = order // עדכון המיון הנוכחי
-        val sorted = sortList(originalRawList, order)
+        if (originalRawSet.isEmpty()) return
+        currentPlaybackSort = order
+
+        // תיקון: המרת Set ל-List רק פעם אחת
+        val sorted = sortList(originalRawSet.toList(), order)
         _playbackItems = sorted
 
         val current = _currentMedia.value
@@ -111,6 +131,8 @@ class PlayerViewModel @Inject constructor(
             val newIndex = _playbackItems.indexOf(current)
             if (newIndex != -1) currentIndex = newIndex
         }
+
+        Log.d("PlayerViewModel", "Playback updated: ${sorted.size} items")
     }
 
     private suspend fun sortList(list: List<Uri>, order: SortOrder): List<Uri> = withContext(Dispatchers.Default) {

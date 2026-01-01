@@ -102,7 +102,6 @@ fun GalleryGridView(
     onBackToPlayer: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // שורה עליונה עם כפתור חזרה וסליידר
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -117,13 +116,12 @@ fun GalleryGridView(
 
             Spacer(Modifier.weight(1f))
 
-            // הסליידר חזר!
             Text("Size", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
             Slider(
                 value = columns.toFloat(),
                 onValueChange = { onColumnsChange(it.toInt()) },
                 valueRange = 2f..8f,
-                steps = 5, // מדרגות כדי להקל על הבחירה
+                steps = 5,
                 modifier = Modifier.width(150.dp),
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
@@ -231,8 +229,11 @@ fun PlayerContentView(
                         .pointerInput(navigationMode, scale) {
                             if (navigationMode == "SWIPE" && scale == 1f) {
                                 detectHorizontalDragGestures { _, dragAmount ->
-                                    if (dragAmount < -50) onNext()
-                                    else if (dragAmount > 50) onPrev()
+                                    // תיקון: הפוך את הכיוון!
+                                    // swipe left (dragAmount < 0) = previous
+                                    // swipe right (dragAmount > 0) = next
+                                    if (dragAmount < -50) onPrev()
+                                    else if (dragAmount > 50) onNext()
                                 }
                             }
                         }

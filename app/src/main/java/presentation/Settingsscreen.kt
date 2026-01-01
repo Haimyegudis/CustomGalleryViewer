@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +25,9 @@ fun SettingsScreen(
     val playbackSort by viewModel.playbackSort.collectAsState()
     val gallerySort by viewModel.gallerySort.collectAsState()
     val currentNavMode by viewModel.navigationMode.collectAsState()
+    val cacheInfo by viewModel.cacheInfo.collectAsState()
+
+    var showClearCacheDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -40,7 +44,7 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState()) // הוספנו גלילה למקרה שהמסך קטן
+                .verticalScroll(rememberScrollState())
         ) {
             // --- 1. Gallery Display Sort ---
             Text("Gallery Display Order", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -71,7 +75,84 @@ fun SettingsScreen(
             SortOrderOption("Tap", "Tap sides to navigate", currentNavMode == "TAP") { viewModel.setNavigationMode("TAP") }
             Spacer(Modifier.height(4.dp))
             SortOrderOption("Swipe", "Swipe screen to navigate", currentNavMode == "SWIPE") { viewModel.setNavigationMode("SWIPE") }
+
+            Divider(Modifier.padding(vertical = 16.dp))
+
+            // --- 4. Cache Management ---
+            Text("Cache Management", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text("Speed up loading by caching scanned folders", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Cached Folders", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${cacheInfo.size} folders • ${cacheInfo.values.sumOf { it.fileCount }} files",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showClearCacheDialog = true },
+                            enabled = cacheInfo.isNotEmpty()
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                "Clear Cache",
+                                tint = if (cacheInfo.isNotEmpty())
+                                    MaterialTheme.colorScheme.error
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+
+                    if (cacheInfo.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Cache saves time on next load. Clear if folders content changed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
+    }
+
+    // Dialog לאישור ניקוי Cache
+    if (showClearCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheDialog = false },
+            title = { Text("Clear Cache?") },
+            text = {
+                Text("This will remove all cached folder data. Next scan will be slower but will pick up any new files.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.clearCache()
+                        showClearCacheDialog = false
+                    }
+                ) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

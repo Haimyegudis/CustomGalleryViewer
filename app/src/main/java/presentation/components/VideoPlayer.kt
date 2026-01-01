@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -26,8 +27,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -71,6 +75,13 @@ fun VideoPlayer(
     var isDragging by remember { mutableStateOf(false) }
     var isSeekMode by remember { mutableStateOf(false) }
 
+    // תיקון: מצב גרירת סליידר נפרד
+    var isSliderDragging by remember { mutableStateOf(false) }
+    var sliderPosition by remember { mutableLongStateOf(0L) }
+
+    // תיקון: שמירת מיקום אזור הסליידר
+    var sliderBounds by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+
     // אינדיקטורים
     var showVolumeIndicator by remember { mutableStateOf(false) }
     var currentVolumeLevel by remember { mutableFloatStateOf(0.5f) }
@@ -99,6 +110,7 @@ fun VideoPlayer(
     LaunchedEffect(uri) {
         hasEnded = false
         isDragging = false
+        isSliderDragging = false
         showSeekIndicator = false
         showVolumeIndicator = false
         showBrightnessIndicator = false
@@ -121,7 +133,7 @@ fun VideoPlayer(
     }
 
     LaunchedEffect(isControlsVisible, isDragging) {
-        if (isControlsVisible && !isDragging) {
+        if (isControlsVisible && !isDragging && !isSliderDragging) {
             delay(3000)
             isControlsVisible = false
         }
@@ -129,7 +141,7 @@ fun VideoPlayer(
 
     LaunchedEffect(Unit) {
         while (true) {
-            if (!isDragging) {
+            if (!isDragging && !isSliderDragging) {
                 currentPosition = exoPlayer.currentPosition
                 duration = exoPlayer.duration.coerceAtLeast(0L)
                 isPlaying = exoPlayer.isPlaying
@@ -159,31 +171,44 @@ fun VideoPlayer(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { offset ->
-                        val width = size.width
-                        if (offset.x < width * 0.3) {
-                            onPrev()
-                        } else if (offset.x > width * 0.7) {
-                            onNext()
-                        } else {
-                            isControlsVisible = !isControlsVisible
+                        // תיקון: אם לחצנו על אזור הסליידר, לא לעשות כלום
+                        val isInSliderArea = sliderBounds?.let { (top, bottom) ->
+                            offset.y >= top && offset.y <= bottom
+                        } ?: false
+
+                        if (!isInSliderArea) {
+                            val width = size.width
+                            if (offset.x < width * 0.3) {
+                                onPrev()
+                            } else if (offset.x > width * 0.7) {
+                                onNext()
+                            } else {
+                                isControlsVisible = !isControlsVisible
+                            }
                         }
                     },
                     onLongPress = { showActionMenu = true }
                 )
             }
-            // זיהוי DRAG
-            .pointerInput(Unit) {
+            // זיהוי DRAG - רק אם לא באזור הסליידר
+            .pointerInput(sliderBounds) {
                 detectDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                        seekStartPosition = currentPosition
-                        // שמירת המצב ההתחלתי של הווליום והבהירות
-                        startVolume = getCurrentVolume(context)
-                        startBrightness = getCurrentBrightness(context)
+                    onDragStart = { offset ->
+                        // תיקון: בדיקה אם התחלנו לגרור באזור הסליידר
+                        val isInSliderArea = sliderBounds?.let { (top, bottom) ->
+                            offset.y >= top && offset.y <= bottom
+                        } ?: false
 
-                        totalDragDistanceX = 0f
-                        totalDragDistanceY = 0f
-                        isSeekMode = false
+                        if (!isInSliderArea) {
+                            isDragging = true
+                            seekStartPosition = currentPosition
+                            startVolume = getCurrentVolume(context)
+                            startBrightness = getCurrentBrightness(context)
+
+                            totalDragDistanceX = 0f
+                            totalDragDistanceY = 0f
+                            isSeekMode = false
+                        }
                     },
                     onDragEnd = {
                         if (isSeekMode && showSeekIndicator) {
@@ -205,11 +230,12 @@ fun VideoPlayer(
                         isDragging = false
                     }
                 ) { change, dragAmount ->
+                    if (!isDragging) return@detectDragGestures
+
                     val (dx, dy) = dragAmount
                     totalDragDistanceX += dx
                     totalDragDistanceY += dy
 
-                    // זיהוי כיוון ראשוני
                     if (!isSeekMode && !showVolumeIndicator && !showBrightnessIndicator) {
                         if (abs(totalDragDistanceX) > abs(totalDragDistanceY)) {
                             if (abs(totalDragDistanceX) > 10) isSeekMode = true
@@ -229,7 +255,6 @@ fun VideoPlayer(
                     }
 
                     if (isSeekMode) {
-                        // Seek Logic
                         val seekSensitivity = 150f
                         val seekDelta = (totalDragDistanceX * seekSensitivity).toLong()
                         seekPreviewTime = (seekStartPosition + seekDelta).coerceIn(0, duration)
@@ -237,11 +262,7 @@ fun VideoPlayer(
                         showVolumeIndicator = false
                         showBrightnessIndicator = false
                     } else {
-                        // Volume / Brightness Logic
-                        // רגישות: גובה מסך מלא (~2000px) ישנה מ-0 ל-100%
                         val sensitivity = 2000f
-
-                        // חישוב השינוי באחוזים (גרירה למעלה = חיובי)
                         val deltaPercent = -totalDragDistanceY / sensitivity
 
                         if (showBrightnessIndicator) {
@@ -314,21 +335,47 @@ fun VideoPlayer(
                         }
                     }
 
-                    Column {
-                        val displayTime = if (isSeekMode) seekPreviewTime else currentPosition
+                    // תיקון: אזור הסליידר מוגדר בנפרד ושומר את המיקום שלו
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { coordinates ->
+                                val position = coordinates.positionInWindow()
+                                val height = coordinates.size.height
+                                sliderBounds = Pair(position.y, position.y + height)
+                            }
+                    ) {
+                        val displayTime = when {
+                            isSliderDragging -> sliderPosition
+                            isSeekMode -> seekPreviewTime
+                            else -> currentPosition
+                        }
+
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(formatTime(displayTime), color = Color.White)
                             Text(formatTime(duration), color = Color.White)
                         }
+
+                        // תיקון: סליידר עובד!
                         Slider(
-                            value = if (duration > 0) displayTime.toFloat() else 0f,
-                            onValueChange = {
-                                isDragging = true
-                                exoPlayer.seekTo(it.toLong())
+                            value = if (duration > 0) {
+                                if (isSliderDragging) sliderPosition.toFloat()
+                                else currentPosition.toFloat()
+                            } else 0f,
+                            onValueChange = { newValue ->
+                                isSliderDragging = true
+                                sliderPosition = newValue.toLong()
                             },
-                            onValueChangeFinished = { isDragging = false },
+                            onValueChangeFinished = {
+                                exoPlayer.seekTo(sliderPosition)
+                                isSliderDragging = false
+                            },
                             valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary, inactiveTrackColor = Color.White.copy(0.5f))
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = Color.White.copy(0.5f)
+                            )
                         )
                     }
                 }
@@ -446,7 +493,6 @@ fun formatFileSize(bytes: Long): String {
     return String.format("%.2f MB", mb)
 }
 
-// קבלת ווליום נוכחי כאחוז (0.0 - 1.0)
 fun getCurrentVolume(context: Context): Float {
     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -454,7 +500,6 @@ fun getCurrentVolume(context: Context): Float {
     return if (max > 0) cur.toFloat() / max else 0f
 }
 
-// הגדרת ווליום לפי אחוז
 fun setAppVolume(context: Context, percent: Float) {
     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -462,15 +507,12 @@ fun setAppVolume(context: Context, percent: Float) {
     am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
 }
 
-// קבלת בהירות נוכחית
 fun getCurrentBrightness(context: Context): Float {
     val act = context as? Activity ?: return 0.5f
     val lp = act.window.attributes
-    // אם הבהירות שלילית (אוטומטי), נחזיר 0.5 כברירת מחדל
     return if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
 }
 
-// הגדרת בהירות לפי אחוז
 fun setAppBrightness(context: Context, percent: Float) {
     val act = context as? Activity ?: return
     val lp = act.window.attributes
