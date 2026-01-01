@@ -21,6 +21,8 @@ import com.example.customgalleryviewer.data.PlaylistWithItems
 fun HomeScreen(
     onNavigateToPlayer: (Long) -> Unit,
     onNavigateToAdd: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToEdit: (Long) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val playlists by viewModel.playlists.collectAsState()
@@ -30,7 +32,7 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("Gallery Playlists") },
                 actions = {
-                    IconButton(onClick = { /* TODO: Settings */ }) {
+                    IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "Settings")
                     }
                 }
@@ -80,7 +82,7 @@ fun HomeScreen(
                     PlaylistCard(
                         playlistWithItems = playlistWithItems,
                         onClick = { onNavigateToPlayer(playlistWithItems.playlist.id) },
-                        onLongClick = { /* TODO: Edit */ },
+                        onLongClick = { onNavigateToEdit(playlistWithItems.playlist.id) },
                         onDelete = { viewModel.deletePlaylist(playlistWithItems.playlist) }
                     )
                 }

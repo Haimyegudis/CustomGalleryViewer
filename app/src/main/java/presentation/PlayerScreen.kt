@@ -1,7 +1,10 @@
 package com.example.customgalleryviewer.presentation
 
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.MediaStore
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import androidx.compose.animation.AnimatedVisibility
@@ -12,10 +15,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -32,6 +34,9 @@ import coil.compose.AsyncImage
 import com.example.customgalleryviewer.presentation.components.ActionMenuDialog
 import com.example.customgalleryviewer.presentation.components.MediaInfoDialog
 import com.example.customgalleryviewer.presentation.components.VideoPlayer
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -82,90 +87,93 @@ fun PlayerScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                // Image viewer
-                AsyncImage(
-                    model = uri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
-                )
+                // Image viewer with Info and ActionMenu
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
 
-                // Info button (top-left when center is tapped)
-                AnimatedVisibility(
-                    visible = showInfoButton,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp)
-                ) {
-                    IconButton(
-                        onClick = { showInfoDialog = true },
+                    // Info button (top-left when center is tapped)
+                    AnimatedVisibility(
+                        visible = showInfoButton,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
                         modifier = Modifier
-                            .size(48.dp)
-                            .background(Color.Black.copy(0.6f), RoundedCornerShape(24.dp))
+                            .align(Alignment.TopStart)
+                            .padding(16.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = "Info",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                        IconButton(
+                            onClick = { showInfoDialog = true },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color.Black.copy(0.6f), RoundedCornerShape(24.dp))
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = "Info",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+
+                    // Navigation zones
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(0.35f)
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { viewModel.onPrevious() },
+                                        onLongPress = { showActionMenu = true }
+                                    )
+                                }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(0.3f)
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { showInfoButton = !showInfoButton },
+                                        onLongPress = { showActionMenu = true }
+                                    )
+                                }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(0.35f)
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { viewModel.onNext() },
+                                        onLongPress = { showActionMenu = true }
+                                    )
+                                }
                         )
                     }
-                }
 
-                Row(modifier = Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(0.35f)
-                            .fillMaxHeight()
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { viewModel.onPrevious() },
-                                    onLongPress = { showActionMenu = true }
-                                )
-                            }
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(0.3f)
-                            .fillMaxHeight()
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { showInfoButton = !showInfoButton },
-                                    onLongPress = { showActionMenu = true }
-                                )
-                            }
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(0.35f)
-                            .fillMaxHeight()
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { viewModel.onNext() },
-                                    onLongPress = { showActionMenu = true }
-                                )
-                            }
-                    )
-                }
+                    // Info Dialog
+                    if (showInfoDialog) {
+                        MediaInfoDialog(
+                            uri = uri,
+                            isVideo = false,
+                            onDismiss = { showInfoDialog = false }
+                        )
+                    }
 
-                // Info Dialog
-                if (showInfoDialog) {
-                    MediaInfoDialog(
-                        uri = uri,
-                        isVideo = false,
-                        onDismiss = { showInfoDialog = false }
-                    )
-                }
-
-                // Action Menu (Share, Open With)
-                if (showActionMenu) {
-                    ActionMenuDialog(
-                        uri = uri,
-                        isVideo = false,
-                        onDismiss = { showActionMenu = false }
-                    )
+                    // Action Menu (Share, Open With)
+                    if (showActionMenu) {
+                        ActionMenuDialog(
+                            uri = uri,
+                            isVideo = false,
+                            onDismiss = { showActionMenu = false }
+                        )
+                    }
                 }
             }
         } ?: CircularProgressIndicator(

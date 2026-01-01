@@ -12,14 +12,17 @@ fun NavigationGraph(navController: NavHostController) {
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
             HomeScreen(
-                onPlaylistClick = { playlistId ->
+                onNavigateToPlayer = { playlistId ->
                     navController.navigate("player/$playlistId")
                 },
-                onEditPlaylist = { playlistId ->
-                    navController.navigate("edit_playlist/$playlistId")
+                onNavigateToAdd = {
+                    navController.navigate("add_playlist")
                 },
-                onSettingsClick = {
+                onNavigateToSettings = {
                     navController.navigate("settings")
+                },
+                onNavigateToEdit = { playlistId ->
+                    navController.navigate("edit_playlist/$playlistId")
                 }
             )
         }
@@ -46,6 +49,12 @@ fun NavigationGraph(navController: NavHostController) {
         composable("settings") {
             SettingsScreen(
                 onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable("add_playlist") {
+            AddPlaylistScreen(
+                onBack = { navController.popBackStack() }
             )
         }
     }

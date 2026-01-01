@@ -37,7 +37,9 @@ class MainActivity : ComponentActivity() {
                         composable("home") {
                             HomeScreen(
                                 onNavigateToPlayer = { id -> navController.navigate("player/$id") },
-                                onNavigateToAdd = { navController.navigate("add_playlist") }
+                                onNavigateToAdd = { navController.navigate("add_playlist") },
+                                onNavigateToSettings = { navController.navigate("settings") },
+                                onNavigateToEdit = { id -> navController.navigate("edit_playlist/$id") }
                             )
                         }
 
