@@ -14,11 +14,30 @@ class SettingsViewModel @Inject constructor(
     private val settingsManager: SettingsManager
 ) : ViewModel() {
 
-    private val _currentSortOrder = MutableStateFlow(settingsManager.getSortOrder())
-    val currentSortOrder: StateFlow<SortOrder> = _currentSortOrder.asStateFlow()
+    // Playback Sort
+    private val _playbackSort = MutableStateFlow(settingsManager.getPlaybackSort())
+    val playbackSort: StateFlow<SortOrder> = _playbackSort.asStateFlow()
 
-    fun setSortOrder(order: SortOrder) {
-        settingsManager.setSortOrder(order)
-        _currentSortOrder.value = order
+    fun setPlaybackSort(order: SortOrder) {
+        settingsManager.setPlaybackSort(order)
+        _playbackSort.value = order
+    }
+
+    // Gallery Sort
+    private val _gallerySort = MutableStateFlow(settingsManager.getGallerySort())
+    val gallerySort: StateFlow<SortOrder> = _gallerySort.asStateFlow()
+
+    fun setGallerySort(order: SortOrder) {
+        settingsManager.setGallerySort(order)
+        _gallerySort.value = order
+    }
+
+    // Navigation Mode
+    private val _navigationMode = MutableStateFlow(settingsManager.getNavigationMode())
+    val navigationMode: StateFlow<String> = _navigationMode.asStateFlow()
+
+    fun setNavigationMode(mode: String) {
+        settingsManager.setNavigationMode(mode)
+        _navigationMode.value = mode
     }
 }

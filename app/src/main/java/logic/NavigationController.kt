@@ -42,8 +42,8 @@ class NavigationController @Inject constructor(
         synchronized(lock) {
             val wasEmpty = masterList.isEmpty()
 
-            // Sort items based on settings
-            val sortedItems = when (settingsManager.getSortOrder()) {
+            // Sort items based on playback settings (תיקון: שימוש ב-getPlaybackSort)
+            val sortedItems = when (settingsManager.getPlaybackSort()) {
                 SortOrder.BY_NAME -> sortByName(newItems)
                 SortOrder.BY_DATE -> sortByDate(newItems)
                 SortOrder.RANDOM -> newItems
@@ -110,7 +110,8 @@ class NavigationController @Inject constructor(
     private fun nextInternal() {
         if (masterList.isEmpty()) return
 
-        when (settingsManager.getSortOrder()) {
+        // תיקון: שימוש ב-getPlaybackSort
+        when (settingsManager.getPlaybackSort()) {
             SortOrder.RANDOM -> {
                 if (currentHistoryIndex < history.lastIndex) {
                     currentHistoryIndex++
@@ -147,7 +148,8 @@ class NavigationController @Inject constructor(
                 return
             }
 
-            when (settingsManager.getSortOrder()) {
+            // תיקון: שימוש ב-getPlaybackSort
+            when (settingsManager.getPlaybackSort()) {
                 SortOrder.RANDOM -> {
                     if (currentHistoryIndex > 0) {
                         currentHistoryIndex--

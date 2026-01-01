@@ -477,42 +477,81 @@ fun ActionMenuDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    // 1. שליפת המידע על הקובץ (שימוש בפונקציה שכבר קיימת בקובץ)
+    val mediaInfo = remember { getMediaInfo(context, uri) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Actions") },
+        title = { Text("Media Options") }, // שיניתי כותרת למשהו כללי יותר
         text = {
             Column {
+                // 2. הצגת המידע (כמו שהיה בכפתור ה-i)
+                Text(
+                    "Properties",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                InfoRow("Name:", mediaInfo.name)
+                InfoRow("Size:", mediaInfo.size)
+                InfoRow("Path:", mediaInfo.path)
+                InfoRow("Date:", mediaInfo.date)
+                if (isVideo) {
+                    InfoRow("Duration:", mediaInfo.duration)
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 16.dp))
+
+                // 3. הכפתורים המקוריים (שיתוף ופתיחה)
+                Text(
+                    "Actions",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
                 TextButton(
                     onClick = {
                         shareMedia(context, uri, isVideo)
                         onDismiss()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 4.dp) // יישור לימין/שמאל
                 ) {
-                    Icon(Icons.Default.Share, null, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Share")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Share, null, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Share", style = MaterialTheme.typography.bodyLarge)
+                    }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
 
                 TextButton(
                     onClick = {
                         openWith(context, uri, isVideo)
                         onDismiss()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
-                    Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open With")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Open With App", style = MaterialTheme.typography.bodyLarge)
+                    }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Close")
             }
         }
     )
@@ -533,25 +572,19 @@ fun getMediaInfo(context: Context, uri: Uri): MediaInfo {
     var date = ""
     var duration = ""
 
+    // מקרה 1: קובץ מהגלריה (Content Provider)
     if (uri.scheme == "content") {
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
                 val nameIndex = it.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) {
-                    name = it.getString(nameIndex) ?: "Unknown"
-                }
+                if (nameIndex >= 0) name = it.getString(nameIndex) ?: "Unknown"
 
                 val sizeIndex = it.getColumnIndex(MediaStore.MediaColumns.SIZE)
-                if (sizeIndex >= 0) {
-                    val sizeBytes = it.getLong(sizeIndex)
-                    size = formatFileSize(sizeBytes)
-                }
+                if (sizeIndex >= 0) size = formatFileSize(it.getLong(sizeIndex))
 
                 val dataIndex = it.getColumnIndex(MediaStore.MediaColumns.DATA)
-                if (dataIndex >= 0) {
-                    path = it.getString(dataIndex) ?: path
-                }
+                if (dataIndex >= 0) path = it.getString(dataIndex) ?: path
 
                 val dateIndex = it.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
                 if (dateIndex >= 0) {
@@ -563,9 +596,21 @@ fun getMediaInfo(context: Context, uri: Uri): MediaInfo {
                 val durationIndex = it.getColumnIndex(MediaStore.Video.Media.DURATION)
                 if (durationIndex >= 0) {
                     val durationMs = it.getLong(durationIndex)
-                    duration = formatTime(durationMs)
+                    if (durationMs > 0) duration = formatTime(durationMs)
                 }
             }
+        }
+    }
+    // מקרה 2: קובץ רגיל (File Path) - התיקון שהיה חסר
+    else if (uri.scheme == "file" || uri.path?.startsWith("/") == true) {
+        val file = File(uri.path ?: "")
+        if (file.exists()) {
+            name = file.name
+            size = formatFileSize(file.length())
+            path = file.absolutePath
+
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+            date = sdf.format(Date(file.lastModified()))
         }
     }
 
