@@ -4,6 +4,8 @@ import android.app.Activity
 import android.net.Uri
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +55,11 @@ fun PlayerScreen(
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val context = LocalContext.current
 
+    // לוג למעקב אחרי שינויים
+    LaunchedEffect(isGalleryMode, galleryItems.size) {
+        android.util.Log.d("PlayerScreen", "State: isGalleryMode=$isGalleryMode, galleryItems=${galleryItems.size}, currentMedia=$currentMedia")
+    }
+
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -61,7 +68,12 @@ fun PlayerScreen(
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
         }
+
+        android.util.Log.d("PlayerScreen", "DisposableEffect: Loading playlist $playlistId")
         viewModel.loadPlaylist(playlistId)
+        // תיקון: נכנסים תמיד למצב גלריה בהתחלה
+        viewModel.setGalleryMode(true)
+
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             if (window != null) {
@@ -70,15 +82,29 @@ fun PlayerScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // תיקון 1: כפתור אחורה במצב גלריה חוזר לרשימות
+    BackHandler {
+        if (isGalleryMode) {
+            // במצב גלריה - חזרה למסך הרשימות
+            (context as? Activity)?.finish()
+        } else {
+            // במצב תמונה - חזרה לגלריה
+            viewModel.toggleGalleryMode()
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isGalleryMode) {
             GalleryGridView(
                 items = galleryItems,
                 currentUri = currentMedia,
                 columns = gridColumns,
-                onItemClick = { uri -> viewModel.jumpToItem(uri) },
+                onItemClick = { uri ->
+                    viewModel.jumpToItem(uri)
+                    viewModel.toggleGalleryMode() // עובר למצב תמונה אחרי בחירה
+                },
                 onColumnsChange = { viewModel.setGridColumns(it) },
-                onBackToPlayer = { viewModel.toggleGalleryMode() }
+                onBackToHome = { (context as? Activity)?.finish() }
             )
         } else {
             PlayerContentView(
@@ -92,6 +118,7 @@ fun PlayerScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryGridView(
     items: List<Uri>,
@@ -99,79 +126,169 @@ fun GalleryGridView(
     columns: Int,
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
-    onBackToPlayer: () -> Unit
+    onBackToHome: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // שורה עליונה עם כפתור חזרה וסליידר
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.Black.copy(0.8f))
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBackToPlayer) {
-                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-            }
-            Text("Gallery", color = Color.White, modifier = Modifier.padding(start = 8.dp))
+    android.util.Log.d("GalleryGridView", "Rendering with ${items.size} items, isGalleryMode=true")
 
-            Spacer(Modifier.weight(1f))
-
-            // הסליידר חזר!
-            Text("Size", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
-            Slider(
-                value = columns.toFloat(),
-                onValueChange = { onColumnsChange(it.toInt()) },
-                valueRange = 2f..8f,
-                steps = 5, // מדרגות כדי להקל על הבחירה
-                modifier = Modifier.width(150.dp),
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = Color.White.copy(0.5f)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Gallery", style = MaterialTheme.typography.headlineSmall) },
+                navigationIcon = {
+                    IconButton(onClick = onBackToHome) {
+                        Icon(Icons.Default.ArrowBack, "Back to playlists")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             )
         }
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(2.dp)
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            items(items) { uri ->
-                val isSelected = uri == currentUri
-                val isVideo = isVideo(uri.toString())
-                val context = LocalContext.current
-
-                Box(
-                    modifier = Modifier
-                        .padding(1.dp)
-                        .aspectRatio(1f)
-                        .border(
-                            if (isSelected) 3.dp else 0.dp,
-                            if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-                        )
-                        .clickable { onItemClick(uri) }
+            // סליידר גודל
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(uri)
-                            .decoderFactory(VideoFrameDecoder.Factory())
-                            .crossfade(true)
-                            .build(),
+                    Icon(
+                        Icons.Default.GridView,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                        error = ColorPainter(Color.DarkGray)
+                        tint = MaterialTheme.colorScheme.primary
                     )
-                    if (isVideo) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)))
-                        Icon(
-                            imageVector = Icons.Default.PlayCircle,
-                            contentDescription = null,
-                            tint = Color.White.copy(0.9f),
-                            modifier = Modifier.align(Alignment.Center).size(24.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Grid size",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Slider(
+                        value = columns.toFloat(),
+                        onValueChange = { onColumnsChange(it.toInt()) },
+                        valueRange = 2f..8f,
+                        steps = 5,
+                        modifier = Modifier.width(150.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
                         )
+                    )
+                    Text(
+                        columns.toString(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+
+            if (items.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.ImageNotSupported,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "No media found",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Check your playlist items",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(items) { uri ->
+                        val isSelected = uri == currentUri
+                        val isVideo = isVideo(uri.toString())
+                        val context = LocalContext.current
+
+                        Card(
+                            modifier = Modifier
+                                .aspectRatio(1f)
+                                .clickable { onItemClick(uri) },
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = if (isSelected) 8.dp else 2.dp
+                            ),
+                            border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(uri)
+                                        .decoderFactory(VideoFrameDecoder.Factory())
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                    error = ColorPainter(MaterialTheme.colorScheme.errorContainer)
+                                )
+                                if (isVideo) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .size(48.dp),
+                                        shape = MaterialTheme.shapes.large,
+                                        color = Color.Black.copy(0.6f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayCircle,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.padding(8.dp)
+                                        )
+                                    }
+                                }
+                                if (isSelected) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .size(24.dp),
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.primary
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -231,8 +348,9 @@ fun PlayerContentView(
                         .pointerInput(navigationMode, scale) {
                             if (navigationMode == "SWIPE" && scale == 1f) {
                                 detectHorizontalDragGestures { _, dragAmount ->
-                                    if (dragAmount < -50) onNext()
-                                    else if (dragAmount > 50) onPrev()
+                                    // תיקון: משמאל לימין = קדימה, מימין לשמאל = אחורה
+                                    if (dragAmount > 50) onNext()
+                                    else if (dragAmount < -50) onPrev()
                                 }
                             }
                         }
@@ -254,25 +372,45 @@ fun PlayerContentView(
                     if (scale == 1f) {
                         Row(modifier = Modifier.fillMaxSize()) {
                             Box(modifier = Modifier.weight(0.3f).fillMaxHeight().pointerInput(navigationMode) {
-                                detectTapGestures(onTap = { if (navigationMode == "TAP") onPrev() }, onLongPress = { showActionMenu = true })
+                                detectTapGestures(
+                                    onTap = { if (navigationMode == "TAP") onPrev() },
+                                    onLongPress = { showActionMenu = true }
+                                )
                             })
                             Box(modifier = Modifier.weight(0.4f).fillMaxHeight().pointerInput(Unit) {
                                 detectTapGestures(onLongPress = { showActionMenu = true })
                             })
                             Box(modifier = Modifier.weight(0.3f).fillMaxHeight().pointerInput(navigationMode) {
-                                detectTapGestures(onTap = { if (navigationMode == "TAP") onNext() }, onLongPress = { showActionMenu = true })
+                                detectTapGestures(
+                                    onTap = { if (navigationMode == "TAP") onNext() },
+                                    onLongPress = { showActionMenu = true }
+                                )
                             })
                         }
                     }
 
-                    if (showActionMenu) ActionMenuDialog(uri = uri, isVideo = false, onDismiss = { showActionMenu = false })
+                    if (showActionMenu) {
+                        ActionMenuDialog(
+                            uri = uri,
+                            isVideo = false,
+                            onDismiss = { showActionMenu = false }
+                        )
+                    }
                 }
             }
-            IconButton(
+
+            FloatingActionButton(
                 onClick = onToggleGallery,
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp, end = 48.dp).background(Color.Black.copy(0.5f), MaterialTheme.shapes.small)
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer
             ) {
-                Icon(Icons.Default.GridView, "Gallery", tint = Color.White)
+                Icon(
+                    Icons.Default.GridView,
+                    "Gallery",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         }
     }
@@ -280,7 +418,9 @@ fun PlayerContentView(
 
 fun isVideo(path: String): Boolean {
     val lowercasePath = path.lowercase(Locale.getDefault())
-    if (lowercasePath.endsWith(".mp4") || lowercasePath.endsWith(".mkv") || lowercasePath.endsWith(".mov")) return true
+    if (lowercasePath.endsWith(".mp4") || lowercasePath.endsWith(".mkv") ||
+        lowercasePath.endsWith(".mov") || lowercasePath.endsWith(".avi") ||
+        lowercasePath.endsWith(".webm") || lowercasePath.endsWith(".3gp")) return true
     val extension = MimeTypeMap.getFileExtensionFromUrl(path)
     return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)?.startsWith("video") == true
 }
