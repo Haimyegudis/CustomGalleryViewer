@@ -19,12 +19,12 @@ class AddPlaylistViewModel @Inject constructor(
 
     fun createPlaylist(
         name: String,
-        selectedUris: List<Pair<Uri, ItemType>>, // Pair of URI and Type (File/Folder)
+        selectedUris: List<Pair<Uri, ItemType>>,
         filterType: MediaFilterType,
         onComplete: () -> Unit
     ) {
         viewModelScope.launch {
-            // 1. צור את הפלייליסט
+            // יצירת הפלייליסט
             val playlistId = playlistDao.insertPlaylist(
                 PlaylistEntity(
                     name = name,
@@ -34,17 +34,18 @@ class AddPlaylistViewModel @Inject constructor(
                 )
             )
 
-            // 2. צור את הפריטים
+            // יצירת הפריטים
             val items = selectedUris.map { (uri, type) ->
                 PlaylistItemEntity(
                     playlistId = playlistId,
                     uriString = uri.toString(),
                     type = type,
-                    isRecursive = (type == ItemType.FOLDER) // ברירת מחדל: רקורסיבי לתיקיות
+                    isRecursive = (type == ItemType.FOLDER)
                 )
             }
 
             playlistDao.insertItems(items)
+
             onComplete()
         }
     }
