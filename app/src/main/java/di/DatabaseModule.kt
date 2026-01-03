@@ -3,7 +3,9 @@ package com.example.customgalleryviewer.di
 import android.content.Context
 import androidx.room.Room
 import com.example.customgalleryviewer.data.AppDatabase
+import com.example.customgalleryviewer.data.CachedMediaFileDao
 import com.example.customgalleryviewer.data.PlaylistDao
+import com.example.customgalleryviewer.data.PlaylistItemDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,11 +24,25 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "gallery_db"
-        ).build()
+        )
+            // This will delete and recreate the database if schema changes
+            // Safe for development, but you'll lose existing playlists
+            .fallbackToDestructiveMigration()
+            .build()
     }
 
     @Provides
     fun providePlaylistDao(database: AppDatabase): PlaylistDao {
         return database.playlistDao()
+    }
+
+    @Provides
+    fun providePlaylistItemDao(database: AppDatabase): PlaylistItemDao {
+        return database.playlistItemDao()
+    }
+
+    @Provides
+    fun provideCachedMediaFileDao(database: AppDatabase): CachedMediaFileDao {
+        return database.cachedMediaFileDao()
     }
 }

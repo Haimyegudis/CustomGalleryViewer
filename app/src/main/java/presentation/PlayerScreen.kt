@@ -7,7 +7,6 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -53,12 +52,8 @@ fun PlayerScreen(
     val galleryItems by viewModel.galleryItems.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState() // ← NEW
     val context = LocalContext.current
-
-    // לוג למעקב אחרי שינויים
-    LaunchedEffect(isGalleryMode, galleryItems.size) {
-        android.util.Log.d("PlayerScreen", "State: isGalleryMode=$isGalleryMode, galleryItems=${galleryItems.size}, currentMedia=$currentMedia")
-    }
 
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
@@ -69,9 +64,7 @@ fun PlayerScreen(
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
         }
 
-        android.util.Log.d("PlayerScreen", "DisposableEffect: Loading playlist $playlistId")
         viewModel.loadPlaylist(playlistId)
-        // תיקון: נכנסים תמיד למצב גלריה בהתחלה
         viewModel.setGalleryMode(true)
 
         onDispose {
@@ -82,30 +75,56 @@ fun PlayerScreen(
         }
     }
 
-    // תיקון 1: כפתור אחורה במצב גלריה חוזר לרשימות
     BackHandler {
         if (isGalleryMode) {
-            // במצב גלריה - חזרה למסך הרשימות
             (context as? Activity)?.finish()
         } else {
-            // במצב תמונה - חזרה לגלריה
             viewModel.toggleGalleryMode()
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (isGalleryMode) {
+        // ← NEW: Show loading indicator
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(64.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 6.dp
+                    )
+                    Text(
+                        "Scanning media files...",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (galleryItems.isNotEmpty()) {
+                        Text(
+                            "${galleryItems.size} files found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else if (isGalleryMode) {
             GalleryGridView(
                 items = galleryItems,
                 currentUri = currentMedia,
                 columns = gridColumns,
                 onItemClick = { uri ->
                     viewModel.jumpToItem(uri)
-                    viewModel.toggleGalleryMode() // עובר למצב תמונה אחרי בחירה
+                    viewModel.toggleGalleryMode()
                 },
                 onColumnsChange = { viewModel.setGridColumns(it) },
                 onBackToHome = { (context as? Activity)?.finish() },
-                onRefresh = { viewModel.refreshPlaylist() }  // ← הוסף את זה
+                onRefresh = { viewModel.refreshPlaylist() }
             )
         } else {
             PlayerContentView(
@@ -128,10 +147,8 @@ fun GalleryGridView(
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
     onBackToHome: () -> Unit,
-    onRefresh: () -> Unit = {}  // ← פרמטר חדש
+    onRefresh: () -> Unit = {}
 ) {
-    android.util.Log.d("GalleryGridView", "Rendering with ${items.size} items, isGalleryMode=true")
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -142,7 +159,6 @@ fun GalleryGridView(
                     }
                 },
                 actions = {
-                    // ← כפתור Refresh חדש
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, "Refresh files")
                     }
@@ -160,7 +176,7 @@ fun GalleryGridView(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // סליידר גודל
+            // Grid size slider
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -356,7 +372,6 @@ fun PlayerContentView(
                         .pointerInput(navigationMode, scale) {
                             if (navigationMode == "SWIPE" && scale == 1f) {
                                 detectHorizontalDragGestures { _, dragAmount ->
-                                    // תיקון: משמאל לימין = קדימה, מימין לשמאל = אחורה
                                     if (dragAmount > 50) onNext()
                                     else if (dragAmount < -50) onPrev()
                                 }

@@ -44,6 +44,10 @@ class PlayerViewModel @Inject constructor(
     private val _gridColumns = MutableStateFlow(settingsManager.getGridColumns())
     val gridColumns: StateFlow<Int> = _gridColumns.asStateFlow()
 
+    // ✓ NEW: Loading state
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
     init {
         viewModelScope.launch {
             settingsManager.gallerySortFlow.collectLatest { sort ->
@@ -62,65 +66,71 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun loadPlaylist(playlistId: Long, forceRefresh: Boolean = false) {
+        // Don't reload if already loaded (unless forced)
         if (!forceRefresh && loadedPlaylistId == playlistId && originalRawList.isNotEmpty()) {
-            Log.d("PlayerViewModel", "loadPlaylist: Using cached data with ${originalRawList.size} items")
+            Log.d("PlayerViewModel", "✓ Playlist $playlistId already loaded with ${originalRawList.size} items")
             return
         }
 
-        Log.d("PlayerViewModel", "loadPlaylist: Loading playlist $playlistId (forceRefresh=$forceRefresh)")
+        Log.d("PlayerViewModel", "⟳ Loading playlist $playlistId (forceRefresh=$forceRefresh)")
         viewModelScope.launch {
+            _isLoading.value = true // ← Show loading indicator
             loadedPlaylistId = playlistId
             currentGallerySort = null
             currentPlaybackSort = null
 
-            val tempRaw = mutableListOf<Uri>()
-            repository.getMediaFilesFlow(playlistId, forceRefresh).collect { batch ->
-                Log.d("PlayerViewModel", "loadPlaylist: Received batch of ${batch.size} items. Total so far: ${tempRaw.size + batch.size}")
-                tempRaw.addAll(batch)
-                originalRawList = ArrayList(tempRaw)
+            try {
+                repository.getMediaFilesFlow(playlistId, forceRefresh).collect { uris ->
+                    Log.d("PlayerViewModel", "📥 Received ${uris.size} files from repository")
+                    originalRawList = uris
 
-                updateGalleryList(settingsManager.getGallerySort())
-                updatePlaybackList(settingsManager.getPlaybackSort())
+                    updateGalleryList(settingsManager.getGallerySort())
+                    updatePlaybackList(settingsManager.getPlaybackSort())
 
-                if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
-                    currentIndex = 0
-                    _currentMedia.value = _playbackItems[0]
-                    Log.d("PlayerViewModel", "loadPlaylist: Set current media to ${_playbackItems[0]}")
+                    if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
+                        currentIndex = 0
+                        _currentMedia.value = _playbackItems[0]
+                        Log.d("PlayerViewModel", "▶ Set initial media: ${_playbackItems[0]}")
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("PlayerViewModel", "❌ Error loading playlist", e)
+            } finally {
+                _isLoading.value = false // ← Hide loading indicator
             }
-            Log.d("PlayerViewModel", "loadPlaylist: Finished loading. Total items: ${originalRawList.size}")
         }
     }
 
     fun refreshPlaylist() {
         val currentPlaylistId = loadedPlaylistId
         if (currentPlaylistId != null) {
-            Log.d("PlayerViewModel", "refreshPlaylist: Force refresh playlist $currentPlaylistId")
+            Log.d("PlayerViewModel", "🔄 Force refresh playlist $currentPlaylistId")
             loadPlaylist(currentPlaylistId, forceRefresh = true)
         }
     }
 
     private suspend fun updateGalleryList(order: SortOrder) {
         if (originalRawList.isEmpty()) {
-            Log.d("PlayerViewModel", "updateGalleryList: originalRawList is empty")
+            Log.d("PlayerViewModel", "⚠ updateGalleryList: originalRawList is empty")
             return
         }
         currentGallerySort = order
         val sorted = sortList(originalRawList, order)
         _galleryItems.value = sorted
-        Log.d("PlayerViewModel", "updateGalleryList: Updated gallery with ${sorted.size} items (sort=$order)")
+        Log.d("PlayerViewModel", "✓ Updated gallery: ${sorted.size} items (sort=$order)")
     }
 
     private suspend fun updatePlaybackList(order: SortOrder) {
         if (originalRawList.isEmpty()) {
-            Log.d("PlayerViewModel", "updatePlaybackList: originalRawList is empty")
+            Log.d("PlayerViewModel", "⚠ updatePlaybackList: originalRawList is empty")
             return
         }
         currentPlaybackSort = order
         val sorted = sortList(originalRawList, order)
         _playbackItems = sorted
-        Log.d("PlayerViewModel", "updatePlaybackList: Updated playback with ${sorted.size} items (sort=$order)")
+        Log.d("PlayerViewModel", "✓ Updated playback: ${sorted.size} items (sort=$order)")
 
+        // Update current index if media exists
         val current = _currentMedia.value
         if (current != null) {
             val newIndex = _playbackItems.indexOf(current)
@@ -162,12 +172,12 @@ class PlayerViewModel @Inject constructor(
 
     fun toggleGalleryMode() {
         _isGalleryMode.value = !_isGalleryMode.value
-        Log.d("PlayerViewModel", "toggleGalleryMode: isGalleryMode=${_isGalleryMode.value}")
+        Log.d("PlayerViewModel", "Gallery mode: ${_isGalleryMode.value}")
     }
 
     fun setGalleryMode(value: Boolean) {
         _isGalleryMode.value = value
-        Log.d("PlayerViewModel", "setGalleryMode: isGalleryMode=$value, galleryItems=${_galleryItems.value.size}, playbackItems=${_playbackItems.size}")
+        Log.d("PlayerViewModel", "Set gallery mode: $value")
     }
 
     fun setGridColumns(columns: Int) {

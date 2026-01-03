@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 
-// המחלקה שהייתה חסרה וגרמה לקריסה
+// Data class for playlist with items relationship
 data class PlaylistWithItems(
     @Embedded val playlist: PlaylistEntity,
     @Relation(
@@ -17,6 +17,7 @@ data class PlaylistWithItems(
     val items: List<PlaylistItemEntity>
 )
 
+// Type converters for enums
 class Converters {
     @TypeConverter
     fun fromMediaFilter(value: MediaFilterType) = value.name
@@ -29,9 +30,20 @@ class Converters {
     fun toItemType(value: String) = ItemType.valueOf(value)
 }
 
-// הגדרת המסד - ללא ה-Interface בתוכו (כי הוא בקובץ נפרד)
-@Database(entities = [PlaylistEntity::class, PlaylistItemEntity::class], version = 1, exportSchema = false)
+// Database definition with all entities
+// Version incremented to 2 because we added CachedMediaFileEntity table
+@Database(
+    entities = [
+        PlaylistEntity::class,
+        PlaylistItemEntity::class,
+        CachedMediaFileEntity::class
+    ],
+    version = 2,
+    exportSchema = false
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
+    abstract fun playlistItemDao(): PlaylistItemDao
+    abstract fun cachedMediaFileDao(): CachedMediaFileDao
 }
