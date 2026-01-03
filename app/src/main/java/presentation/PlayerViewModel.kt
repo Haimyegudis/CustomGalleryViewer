@@ -61,20 +61,20 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun loadPlaylist(playlistId: Long) {
-        if (loadedPlaylistId == playlistId && originalRawList.isNotEmpty()) {
-            Log.d("PlayerViewModel", "loadPlaylist: Already loaded playlist $playlistId with ${originalRawList.size} items")
+    fun loadPlaylist(playlistId: Long, forceRefresh: Boolean = false) {
+        if (!forceRefresh && loadedPlaylistId == playlistId && originalRawList.isNotEmpty()) {
+            Log.d("PlayerViewModel", "loadPlaylist: Using cached data with ${originalRawList.size} items")
             return
         }
 
-        Log.d("PlayerViewModel", "loadPlaylist: Loading playlist $playlistId")
+        Log.d("PlayerViewModel", "loadPlaylist: Loading playlist $playlistId (forceRefresh=$forceRefresh)")
         viewModelScope.launch {
             loadedPlaylistId = playlistId
             currentGallerySort = null
             currentPlaybackSort = null
 
             val tempRaw = mutableListOf<Uri>()
-            repository.getMediaFilesFlow(playlistId).collect { batch ->
+            repository.getMediaFilesFlow(playlistId, forceRefresh).collect { batch ->
                 Log.d("PlayerViewModel", "loadPlaylist: Received batch of ${batch.size} items. Total so far: ${tempRaw.size + batch.size}")
                 tempRaw.addAll(batch)
                 originalRawList = ArrayList(tempRaw)
@@ -89,6 +89,14 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             Log.d("PlayerViewModel", "loadPlaylist: Finished loading. Total items: ${originalRawList.size}")
+        }
+    }
+
+    fun refreshPlaylist() {
+        val currentPlaylistId = loadedPlaylistId
+        if (currentPlaylistId != null) {
+            Log.d("PlayerViewModel", "refreshPlaylist: Force refresh playlist $currentPlaylistId")
+            loadPlaylist(currentPlaylistId, forceRefresh = true)
         }
     }
 

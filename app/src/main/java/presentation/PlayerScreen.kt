@@ -104,7 +104,8 @@ fun PlayerScreen(
                     viewModel.toggleGalleryMode() // עובר למצב תמונה אחרי בחירה
                 },
                 onColumnsChange = { viewModel.setGridColumns(it) },
-                onBackToHome = { (context as? Activity)?.finish() }
+                onBackToHome = { (context as? Activity)?.finish() },
+                onRefresh = { viewModel.refreshPlaylist() }  // ← הוסף את זה
             )
         } else {
             PlayerContentView(
@@ -126,17 +127,24 @@ fun GalleryGridView(
     columns: Int,
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
-    onBackToHome: () -> Unit
+    onBackToHome: () -> Unit,
+    onRefresh: () -> Unit = {}  // ← פרמטר חדש
 ) {
     android.util.Log.d("GalleryGridView", "Rendering with ${items.size} items, isGalleryMode=true")
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Gallery", style = MaterialTheme.typography.headlineSmall) },
+                title = { Text("Gallery (${items.size} items)", style = MaterialTheme.typography.headlineSmall) },
                 navigationIcon = {
                     IconButton(onClick = onBackToHome) {
                         Icon(Icons.Default.ArrowBack, "Back to playlists")
+                    }
+                },
+                actions = {
+                    // ← כפתור Refresh חדש
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, "Refresh files")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
