@@ -1,3 +1,4 @@
+// PlayerViewModel.kt
 package com.example.customgalleryviewer.presentation
 
 import android.net.Uri
@@ -30,23 +31,31 @@ class PlayerViewModel @Inject constructor(
     private val _galleryItems = MutableStateFlow<List<Uri>>(emptyList())
     val galleryItems: StateFlow<List<Uri>> = _galleryItems.asStateFlow()
 
-    private var _playbackItems: List<Uri> = emptyList()
+    private val _filteredGalleryItems = MutableStateFlow<List<Uri>>(emptyList())
+    val filteredGalleryItems: StateFlow<List<Uri>> = _filteredGalleryItems.asStateFlow()
 
-    // תיקון: שימוש ב-LinkedHashSet כדי למנוע כפילויות אבל לשמור סדר
+    private var _playbackItems: List<Uri> = emptyList()
     private val originalRawSet = LinkedHashSet<Uri>()
 
-    private var currentIndex = 0
+    // History navigation
+    private val history = mutableListOf<Int>()
+    private var currentHistoryIndex = -1
 
     private var loadedPlaylistId: Long? = null
-
     private var currentGallerySort: SortOrder? = null
     private var currentPlaybackSort: SortOrder? = null
 
-    private val _isGalleryMode = MutableStateFlow(false)
+    private val _isGalleryMode = MutableStateFlow(true)
     val isGalleryMode: StateFlow<Boolean> = _isGalleryMode.asStateFlow()
 
     private val _gridColumns = MutableStateFlow(settingsManager.getGridColumns())
     val gridColumns: StateFlow<Int> = _gridColumns.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -63,76 +72,84 @@ class PlayerViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            searchQuery.collectLatest { query ->
+                filterGalleryItems(query)
+            }
+        }
     }
 
     fun loadPlaylist(playlistId: Long) {
         if (loadedPlaylistId == playlistId && originalRawSet.isNotEmpty()) {
+            Log.d("PlayerViewModel", "Playlist already loaded")
             return
         }
 
         viewModelScope.launch {
+            _isLoading.value = true
             loadedPlaylistId = playlistId
             currentGallerySort = null
             currentPlaybackSort = null
-
-            // תיקון: ניקוי ה-Set לפני טעינה חדשה
             originalRawSet.clear()
+            history.clear()
+            currentHistoryIndex = -1
 
-            Log.d("PlayerViewModel", "=== Starting playlist load: $playlistId ===")
+            Log.d("PlayerViewModel", "Starting to load playlist $playlistId")
 
-            // תיקון: שימוש ב-collect במקום collectLatest כדי לא לאבד באצ'ים
             repository.getMediaFilesFlow(playlistId).collect { batch ->
-                Log.d("PlayerViewModel", "Received batch: ${batch.size} files")
+                Log.d("PlayerViewModel", "Received batch of ${batch.size} files")
 
-                // תיקון: הוספה ל-Set מונעת כפילויות אוטומטית
                 val sizeBefore = originalRawSet.size
                 originalRawSet.addAll(batch)
                 val sizeAfter = originalRawSet.size
 
-                Log.d("PlayerViewModel", "Added ${sizeAfter - sizeBefore} new files (total: $sizeAfter)")
+                if (sizeAfter > sizeBefore) {
+                    updateGalleryList(settingsManager.getGallerySort())
+                    updatePlaybackList(settingsManager.getPlaybackSort())
 
-                // עדכון מיידי של הגלריה והפלייבק
-                updateGalleryList(settingsManager.getGallerySort())
-                updatePlaybackList(settingsManager.getPlaybackSort())
+                    if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
+                        val firstIndex = 0
+                        history.add(firstIndex)
+                        currentHistoryIndex = 0
+                        _currentMedia.value = _playbackItems[firstIndex]
+                        Log.d("PlayerViewModel", "Set first media: ${_playbackItems[firstIndex]}")
+                    }
 
-                // התחלת ניגון אם עדיין לא התחלנו
-                if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
-                    currentIndex = 0
-                    _currentMedia.value = _playbackItems[0]
-                    Log.d("PlayerViewModel", "Started playback with first item")
+                    if (_isLoading.value && originalRawSet.size >= 20) {
+                        _isLoading.value = false
+                        Log.d("PlayerViewModel", "Stopped loading indicator at ${originalRawSet.size} files")
+                    }
                 }
             }
 
-            Log.d("PlayerViewModel", "=== Playlist load complete: ${originalRawSet.size} total files ===")
+            _isLoading.value = false
+            Log.d("PlayerViewModel", "Finished loading playlist. Total: ${originalRawSet.size} files")
         }
     }
 
     private suspend fun updateGalleryList(order: SortOrder) {
         if (originalRawSet.isEmpty()) return
         currentGallerySort = order
-
-        // תיקון: המרת Set ל-List רק פעם אחת
         val sorted = sortList(originalRawSet.toList(), order)
         _galleryItems.value = sorted
-
-        Log.d("PlayerViewModel", "Gallery updated: ${sorted.size} items")
+        filterGalleryItems(_searchQuery.value)
+        Log.d("PlayerViewModel", "Gallery updated with ${sorted.size} items")
     }
 
     private suspend fun updatePlaybackList(order: SortOrder) {
         if (originalRawSet.isEmpty()) return
         currentPlaybackSort = order
-
-        // תיקון: המרת Set ל-List רק פעם אחת
         val sorted = sortList(originalRawSet.toList(), order)
         _playbackItems = sorted
 
         val current = _currentMedia.value
         if (current != null) {
             val newIndex = _playbackItems.indexOf(current)
-            if (newIndex != -1) currentIndex = newIndex
+            if (newIndex != -1 && history.isNotEmpty()) {
+                history[currentHistoryIndex] = newIndex
+            }
         }
-
-        Log.d("PlayerViewModel", "Playback updated: ${sorted.size} items")
+        Log.d("PlayerViewModel", "Playback updated with ${sorted.size} items")
     }
 
     private suspend fun sortList(list: List<Uri>, order: SortOrder): List<Uri> = withContext(Dispatchers.Default) {
@@ -145,30 +162,122 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    private fun filterGalleryItems(query: String) {
+        val filtered = if (query.isEmpty()) {
+            _galleryItems.value
+        } else {
+            _galleryItems.value.filter {
+                it.lastPathSegment?.contains(query, ignoreCase = true) == true
+            }
+        }
+        _filteredGalleryItems.value = filtered
+        Log.d("PlayerViewModel", "Filtered gallery: ${filtered.size} items (query: '$query')")
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
     fun onNext() {
-        if (_playbackItems.isNotEmpty()) {
-            currentIndex = (currentIndex + 1) % _playbackItems.size
-            _currentMedia.value = _playbackItems[currentIndex]
+        if (_playbackItems.isEmpty()) return
+
+        val isRandom = settingsManager.getPlaybackSort() == SortOrder.RANDOM
+
+        if (currentHistoryIndex < history.lastIndex) {
+            // Moving forward in history
+            currentHistoryIndex++
+            updateMediaFromHistory()
+        } else {
+            // Need to add new item to history
+            val nextIndex = if (isRandom) {
+                generateSmartRandomIndex()
+            } else {
+                val currentIndex = if (history.isEmpty()) -1 else history[currentHistoryIndex]
+                (currentIndex + 1) % _playbackItems.size
+            }
+
+            history.add(nextIndex)
+            currentHistoryIndex = history.lastIndex
+            updateMediaFromHistory()
         }
     }
 
     fun onPrevious() {
-        if (_playbackItems.isNotEmpty()) {
-            currentIndex = if (currentIndex - 1 < 0) _playbackItems.size - 1 else currentIndex - 1
-            _currentMedia.value = _playbackItems[currentIndex]
+        if (_playbackItems.isEmpty()) return
+        if (history.isEmpty()) {
+            onNext()
+            return
         }
+
+        if (currentHistoryIndex > 0) {
+            currentHistoryIndex--
+            updateMediaFromHistory()
+        } else {
+            // At start of history, add previous item
+            val isRandom = settingsManager.getPlaybackSort() == SortOrder.RANDOM
+            val prevIndex = if (isRandom) {
+                generateSmartRandomIndex()
+            } else {
+                val currentIndex = history[currentHistoryIndex]
+                if (currentIndex - 1 < 0) _playbackItems.size - 1 else currentIndex - 1
+            }
+
+            history.add(0, prevIndex)
+            currentHistoryIndex = 0
+            updateMediaFromHistory()
+        }
+    }
+
+    private fun updateMediaFromHistory() {
+        if (currentHistoryIndex >= 0 && currentHistoryIndex < history.size) {
+            val idx = history[currentHistoryIndex]
+            if (idx >= 0 && idx < _playbackItems.size) {
+                _currentMedia.value = _playbackItems[idx]
+            }
+        }
+    }
+
+    private fun generateSmartRandomIndex(): Int {
+        val totalSize = _playbackItems.size
+        if (totalSize == 0) return 0
+        if (totalSize == 1) return 0
+        if (totalSize < 5) return (0 until totalSize).random()
+
+        val bufferSize = kotlin.math.min(50, totalSize / 2)
+        val recentIndices = history.takeLast(bufferSize).toSet()
+        var candidate: Int
+        var attempts = 0
+
+        do {
+            candidate = (0 until totalSize).random()
+            attempts++
+        } while (candidate in recentIndices && attempts < 20)
+
+        return candidate
     }
 
     fun jumpToItem(uri: Uri) {
         val indexInPlayback = _playbackItems.indexOf(uri)
         if (indexInPlayback != -1) {
-            currentIndex = indexInPlayback
+            if (currentHistoryIndex < history.lastIndex) {
+                history.add(indexInPlayback)
+                currentHistoryIndex = history.lastIndex
+            } else {
+                history.add(indexInPlayback)
+                currentHistoryIndex = history.lastIndex
+            }
             _currentMedia.value = uri
             _isGalleryMode.value = false
         }
     }
 
-    fun toggleGalleryMode() { _isGalleryMode.value = !_isGalleryMode.value }
+    fun toggleGalleryMode() {
+        _isGalleryMode.value = !_isGalleryMode.value
+    }
+
+    fun setGalleryMode(mode: Boolean) {
+        _isGalleryMode.value = mode
+    }
 
     fun setGridColumns(columns: Int) {
         _gridColumns.value = columns

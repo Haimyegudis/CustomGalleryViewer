@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.customgalleryviewer.data.SortOrder
 
+// SettingsScreen.kt - add button to clear cache at top
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -35,6 +36,16 @@ fun SettingsScreen(
                 title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, "Back") }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { showClearCacheDialog = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Delete, "Clear Cache", modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear Cache")
+                    }
                 }
             )
         }
@@ -46,7 +57,6 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // --- 1. Gallery Display Sort ---
             Text("Gallery Display Order", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Text("How images appear in grid view", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
 
@@ -56,7 +66,6 @@ fun SettingsScreen(
 
             Divider(Modifier.padding(vertical = 16.dp))
 
-            // --- 2. Playback Sequence ---
             Text("Playback Sequence", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Text("Order when swiping/tapping next", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
 
@@ -68,7 +77,6 @@ fun SettingsScreen(
 
             Divider(Modifier.padding(vertical = 16.dp))
 
-            // --- 3. Navigation Style ---
             Text("Navigation Style", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
 
@@ -78,7 +86,6 @@ fun SettingsScreen(
 
             Divider(Modifier.padding(vertical = 16.dp))
 
-            // --- 4. Cache Management ---
             Text("Cache Management", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Text("Speed up loading by caching scanned folders", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
 
@@ -129,7 +136,6 @@ fun SettingsScreen(
         }
     }
 
-    // Dialog לאישור ניקוי Cache
     if (showClearCacheDialog) {
         AlertDialog(
             onDismissRequest = { showClearCacheDialog = false },

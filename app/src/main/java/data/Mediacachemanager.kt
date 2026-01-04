@@ -1,17 +1,17 @@
+// MediaCacheManager.kt
 package com.example.customgalleryviewer.data
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 data class CachedFolder(
     val folderUri: String,
-    val files: List<String>, // URIs as strings
+    val files: List<String>,
     val lastScanned: Long,
     val fileCount: Int
 )
@@ -25,7 +25,7 @@ class MediaCacheManager @Inject constructor(
     private val gson = Gson()
 
     companion object {
-        private const val CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000L // 24 שעות
+        private const val CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000L
     }
 
     fun getCachedFiles(folderUri: Uri): List<Uri>? {
@@ -34,8 +34,6 @@ class MediaCacheManager @Inject constructor(
 
         return try {
             val cached = gson.fromJson<CachedFolder>(json, CachedFolder::class.java)
-
-            // בדיקה אם ה-Cache עדיין תקף
             val isValid = (System.currentTimeMillis() - cached.lastScanned) < CACHE_VALIDITY_MS
 
             if (isValid) {
@@ -89,20 +87,13 @@ class MediaCacheManager @Inject constructor(
     }
 
     private fun getFolderKey(folderUri: Uri): String {
-        // יצירת מפתח ייחודי מה-URI
-        // נשתמש בחלק הראשון של ה-URI (התקן) + hash של השאר
         val uriStr = folderUri.toString()
-
-        // חילוץ שם התקן מה-URI
-        // דוגמה: content://com.android.externalstorage.documents/tree/E1DF-42EF%3AVideo%20Downloader
         val deviceId = extractDeviceId(uriStr)
         val pathHash = uriStr.hashCode().toString()
-
         return "cache_${deviceId}_${pathHash}"
     }
 
     private fun extractDeviceId(uriStr: String): String {
-        // נסיון לחלץ את מזהה ההתקן (E1DF-42EF)
         val regex = Regex("""tree/([^%/:]+)""")
         val match = regex.find(uriStr)
         return match?.groupValues?.getOrNull(1) ?: "unknown"

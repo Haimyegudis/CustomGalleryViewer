@@ -1,3 +1,4 @@
+// MainActivity.kt
 package com.example.customgalleryviewer
 
 import android.os.Bundle
@@ -32,8 +33,6 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
 
                     NavHost(navController = navController, startDestination = "home") {
-
-                        // 1. מסך הבית
                         composable("home") {
                             HomeScreen(
                                 onNavigateToPlayer = { id -> navController.navigate("player/$id") },
@@ -43,23 +42,23 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // 2. מסך יצירת פלייליסט
                         composable("add_playlist") {
                             AddPlaylistScreen(
                                 onBack = { navController.popBackStack() }
                             )
                         }
 
-                        // 3. הנגן
                         composable(
                             route = "player/{playlistId}",
                             arguments = listOf(navArgument("playlistId") { type = NavType.LongType })
                         ) { backStackEntry ->
                             val playlistId = backStackEntry.arguments?.getLong("playlistId") ?: -1L
-                            PlayerScreen(playlistId = playlistId)
+                            PlayerScreen(
+                                playlistId = playlistId,
+                                onBackToHome = { navController.popBackStack() }
+                            )
                         }
 
-                        // 4. עריכת פלייליסט
                         composable(
                             route = "edit_playlist/{playlistId}",
                             arguments = listOf(navArgument("playlistId") { type = NavType.LongType })
@@ -71,7 +70,6 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // 5. הגדרות
                         composable("settings") {
                             SettingsScreen(
                                 onBackClick = { navController.popBackStack() }

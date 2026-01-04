@@ -1,3 +1,4 @@
+// FileScanner.kt
 package com.example.customgalleryviewer.util
 
 import android.content.Context
@@ -25,34 +26,50 @@ class FileScanner(
     private val videoExtensions = setOf("mp4", "mkv", "avi", "mov", "flv", "wmv", "3gp", "webm", "ts", "m4v", "mpg", "mpeg", "vob")
 
     companion object {
-        private const val BATCH_SIZE = 50
-        private const val BATCH_DELAY_MS = 100L
+        private const val BATCH_SIZE = 150
+        private const val BATCH_DELAY_MS = 30L
     }
 
     suspend fun scanPlaylistItemsFlow(
         items: List<PlaylistItemEntity>,
         filter: MediaFilterType
     ): Flow<List<Uri>> = flow {
-        Log.d("FileScanner", "=== STARTING PROGRESSIVE SCAN ===")
-        Log.d("FileScanner", "Filter: $filter, Items count: ${items.size}")
+        Log.d("FileScanner", "Starting scan for ${items.size} items, filter: $filter")
 
         for (item in items) {
             if (!currentCoroutineContext().isActive) break
 
             val uri = Uri.parse(item.uriString)
-            Log.d("FileScanner", "Processing item: ${item.type} - $uri, recursive=${item.isRecursive}")
 
             if (item.type == ItemType.FILE) {
+                Log.d("FileScanner", "Emitting single file: $uri")
                 emit(listOf(uri))
             } else {
-                scanFolderProgressive(uri, item.isRecursive, filter).collect { batch ->
-                    Log.d("FileScanner", "Emitting batch of ${batch.size} files")
-                    emit(batch)
+                val cachedFiles = cacheManager.getCachedFiles(uri)
+                if (cachedFiles != null) {
+                    Log.d("FileScanner", "✓ CACHE HIT! ${cachedFiles.size} files from $uri")
+                    cachedFiles.chunked(BATCH_SIZE).forEach { batch ->
+                        emit(batch)
+                        delay(BATCH_DELAY_MS)
+                    }
+                } else {
+                    Log.d("FileScanner", "✗ CACHE MISS - scanning $uri")
+                    val scanned = mutableListOf<Uri>()
+                    scanFolderProgressive(uri, item.isRecursive, filter).collect { batch ->
+                        Log.d("FileScanner", "Scanned batch: ${batch.size} files")
+                        scanned.addAll(batch)
+                        emit(batch)
+                    }
+                    if (scanned.isNotEmpty()) {
+                        cacheManager.cacheFiles(uri, scanned)
+                        Log.d("FileScanner", "Cached ${scanned.size} files for $uri")
+                    } else {
+                        Log.w("FileScanner", "No files found in $uri with filter $filter")
+                    }
                 }
             }
         }
-
-        Log.d("FileScanner", "=== PROGRESSIVE SCAN COMPLETE ===")
+        Log.d("FileScanner", "Scan complete")
     }
 
     private suspend fun scanFolderProgressive(
@@ -60,81 +77,59 @@ class FileScanner(
         recursive: Boolean,
         filter: MediaFilterType
     ): Flow<List<Uri>> = flow {
-        Log.d("FileScanner", "Scanning folder: $folderUri (recursive=$recursive, filter=$filter)")
+        var foundAny = false
 
-        // בדיקת Cache
-        val cachedFiles = cacheManager.getCachedFiles(folderUri)
-        if (cachedFiles != null && cachedFiles.isNotEmpty()) {
-            Log.d("FileScanner", "✓ CACHE HIT! Found ${cachedFiles.size} cached files")
-            cachedFiles.chunked(BATCH_SIZE).forEach { batch ->
-                emit(batch)
-                delay(BATCH_DELAY_MS)
-            }
-            return@flow
-        }
-
-        if (cachedFiles != null && cachedFiles.isEmpty()) {
-            Log.d("FileScanner", "✗ CACHE EMPTY - invalidating")
-            cacheManager.invalidateCache(folderUri)
-        }
-
-        Log.d("FileScanner", "✗ CACHE MISS - scanning from scratch")
-        val allFiles = mutableListOf<Uri>()
-
-        // אסטרטגיה חדשה: תמיד נסה SAF ראשון
-        if (folderUri.scheme == "content") {
-            Log.d("FileScanner", "URI is content:// - using SAF scan")
-
-            scanViaSAFProgressive(folderUri, recursive, filter).collect { batch ->
-                Log.d("FileScanner", "SAF scan batch: ${batch.size} files")
-                allFiles.addAll(batch)
-                emit(batch)
-            }
-
-            Log.d("FileScanner", "SAF scan complete: ${allFiles.size} total files")
-
-            if (allFiles.isNotEmpty()) {
-                cacheManager.cacheFiles(folderUri, allFiles)
-            }
-
-            return@flow
-        }
-
-        // אם זה לא content URI, נסה MediaStore לתיקיות פנימיות
         val physicalPath = getPhysicalPath(folderUri)
-        if (physicalPath != null && isInternalStoragePath(physicalPath)) {
-            Log.d("FileScanner", "Using MediaStore scan for internal path: $physicalPath")
-
-            val mediaStoreFiles = MediaStoreScanner.scanInternalStorage(
-                context,
-                physicalPath,
-                filter
-            )
-
-            if (mediaStoreFiles.isNotEmpty()) {
-                allFiles.addAll(mediaStoreFiles)
-
-                mediaStoreFiles.chunked(BATCH_SIZE).forEach { batch ->
+        if (physicalPath != null) {
+            val folder = File(physicalPath)
+            if (folder.exists() && folder.isDirectory) {
+                Log.d("FileScanner", "Trying physical scan for: $physicalPath")
+                scanPhysicalFolderProgressive(folder, recursive, filter).collect { batch ->
+                    foundAny = true
                     emit(batch)
-                    delay(BATCH_DELAY_MS)
                 }
-
-                cacheManager.cacheFiles(folderUri, allFiles)
-                return@flow
             }
         }
 
-        // אם הגענו לפה, אין קבצים
-        Log.w("FileScanner", "No files found for: $folderUri")
+        if (!foundAny) {
+            Log.d("FileScanner", "Physical scan found nothing, using SAF for: $folderUri")
+            scanViaSAFProgressive(folderUri, recursive, filter).collect { emit(it) }
+        }
     }
 
-    private fun isInternalStoragePath(path: String): Boolean {
-        val normalizedPath = path.lowercase()
-        return normalizedPath.contains("/dcim") ||
-                normalizedPath.contains("/pictures") ||
-                normalizedPath.contains("/camera") ||
-                normalizedPath.contains("/downloads") ||
-                normalizedPath.contains("/screenshots")
+    private suspend fun scanPhysicalFolderProgressive(
+        folder: File,
+        recursive: Boolean,
+        filter: MediaFilterType
+    ): Flow<List<Uri>> = flow {
+        val batch = mutableListOf<Uri>()
+
+        suspend fun scanRecursive(dir: File) {
+            if (!currentCoroutineContext().isActive) return
+            val files = dir.listFiles() ?: return
+
+            for (file in files) {
+                if (!currentCoroutineContext().isActive) return
+
+                if (file.isDirectory) {
+                    if (recursive) scanRecursive(file)
+                } else {
+                    if (isMediaFile(file.name, null, filter)) {
+                        batch.add(Uri.fromFile(file))
+                        if (batch.size >= BATCH_SIZE) {
+                            emit(batch.toList())
+                            batch.clear()
+                            delay(BATCH_DELAY_MS)
+                        }
+                    }
+                }
+            }
+        }
+
+        scanRecursive(folder)
+        if (batch.isNotEmpty()) {
+            emit(batch.toList())
+        }
     }
 
     private suspend fun scanViaSAFProgressive(
@@ -143,22 +138,15 @@ class FileScanner(
         filter: MediaFilterType
     ): Flow<List<Uri>> = flow {
         val batch = mutableListOf<Uri>()
-        var totalFound = 0
 
-        suspend fun scanRecursive(uri: Uri, depth: Int = 0) {
+        suspend fun scanRecursive(uri: Uri) {
             if (!currentCoroutineContext().isActive) return
-            if (depth > 20) {
-                Log.w("FileScanner", "Max recursion depth reached at: $uri")
-                return
-            }
 
             try {
                 val docId = DocumentsContract.getTreeDocumentId(uri)
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, docId)
 
-                Log.d("FileScanner", "SAF scanning: $uri (depth=$depth)")
-
-                val cursor = context.contentResolver.query(
+                context.contentResolver.query(
                     childrenUri,
                     arrayOf(
                         DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -166,19 +154,7 @@ class FileScanner(
                         DocumentsContract.Document.COLUMN_MIME_TYPE
                     ),
                     null, null, null
-                )
-
-                if (cursor == null) {
-                    Log.e("FileScanner", "SAF cursor is null for $uri")
-                    return
-                }
-
-                cursor.use {
-                    val count = cursor.count
-                    Log.d("FileScanner", "SAF found $count items at depth $depth")
-
-                    if (count == 0) return@use
-
+                )?.use { cursor ->
                     while (cursor.moveToNext() && currentCoroutineContext().isActive) {
                         val idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                         val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
@@ -193,21 +169,11 @@ class FileScanner(
                         val fileUri = DocumentsContract.buildDocumentUriUsingTree(uri, documentId)
 
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            Log.d("FileScanner", "Found folder: $name (recursive=$recursive)")
-                            if (recursive) {
-                                scanRecursive(fileUri, depth + 1)
-                            }
+                            if (recursive) scanRecursive(fileUri)
                         } else {
-                            val isMedia = isMediaFile(name, mime, filter)
-                            Log.v("FileScanner", "File: $name, mime=$mime, isMedia=$isMedia")
-
-                            if (isMedia) {
-                                totalFound++
+                            if (isMediaFile(name, mime, filter)) {
                                 batch.add(fileUri)
-                                Log.d("FileScanner", "✓ Media file #$totalFound: $name")
-
                                 if (batch.size >= BATCH_SIZE) {
-                                    Log.d("FileScanner", "Emitting batch of ${batch.size}")
                                     emit(batch.toList())
                                     batch.clear()
                                     delay(BATCH_DELAY_MS)
@@ -217,18 +183,14 @@ class FileScanner(
                     }
                 }
             } catch (e: Exception) {
-                Log.e("FileScanner", "Error scanning SAF at depth $depth: $uri", e)
+                Log.e("FileScanner", "Error scanning $uri", e)
             }
         }
 
         scanRecursive(treeUri)
-
         if (batch.isNotEmpty()) {
-            Log.d("FileScanner", "Emitting final batch of ${batch.size}")
             emit(batch.toList())
         }
-
-        Log.d("FileScanner", "SAF scan found total: $totalFound files")
     }
 
     private fun getPhysicalPath(uri: Uri): String? {
@@ -238,15 +200,9 @@ class FileScanner(
         if (uriString.contains("primary%3A") || uriString.contains("primary:")) {
             val decoded = URLDecoder.decode(uriString, "UTF-8")
             val parts = decoded.split(Regex("primary[:%]"))
-            if (parts.size > 1) {
-                return "$externalStorage/${parts[1]}"
-            }
+            if (parts.size > 1) return "$externalStorage/${parts[1]}"
         }
-
-        if (uri.scheme == "file") {
-            return uri.path
-        }
-
+        if (uri.scheme == "file") return uri.path
         return null
     }
 
@@ -255,13 +211,8 @@ class FileScanner(
         val safeMime = mime?.lowercase() ?: ""
         val ext = safeName.substringAfterLast('.', "")
 
-        val isImageByExt = imageExtensions.contains(ext)
-        val isVideoByExt = videoExtensions.contains(ext)
-        val isImageByMime = safeMime.startsWith("image/")
-        val isVideoByMime = safeMime.startsWith("video/")
-
-        val isImage = isImageByExt || isImageByMime
-        val isVideo = isVideoByExt || isVideoByMime
+        val isImage = imageExtensions.contains(ext) || safeMime.startsWith("image/")
+        val isVideo = videoExtensions.contains(ext) || safeMime.startsWith("video/")
 
         return when (filter) {
             MediaFilterType.PHOTOS_ONLY -> isImage
