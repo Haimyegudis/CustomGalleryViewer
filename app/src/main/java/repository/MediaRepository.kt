@@ -19,6 +19,7 @@ class MediaRepository @Inject constructor(
     private val cacheManager: MediaCacheManager,
     @ApplicationContext private val context: Context
 ) {
+    // יצירת instance של FileScanner
     private val fileScanner = FileScanner(context, cacheManager)
 
     fun getPlaylistsFlow(): Flow<List<PlaylistWithItems>> = playlistDao.getPlaylistsFlow()
