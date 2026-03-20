@@ -3,20 +3,26 @@ package com.example.customgalleryviewer.presentation.components
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.provider.MediaStore
+import android.view.TextureView
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -25,15 +31,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -41,6 +53,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import android.util.Log
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,21 +68,28 @@ fun VideoPlayer(
     uri: Uri,
     onNext: () -> Unit,
     onPrev: () -> Unit,
+    onToggleShuffle: () -> Unit = {},
+    onToggleRepeatList: () -> Unit = {},
+    isShuffleOn: Boolean = false,
+    isRepeatListOn: Boolean = false,
     navigationMode: String = "TAP",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
 
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(false) }
     var showActionMenu by remember { mutableStateOf(false) }
+    var showSpeedMenu by remember { mutableStateOf(false) }
 
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isLooping by remember { mutableStateOf(false) }
-    var hasEnded by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableFloatStateOf(1f) }
+
+    var mediaGeneration by remember { mutableIntStateOf(0) }
+    var endHandledForGeneration by remember { mutableIntStateOf(-1) }
 
     var isDragging by remember { mutableStateOf(false) }
     var isSeekMode by remember { mutableStateOf(false) }
@@ -88,9 +109,11 @@ fun VideoPlayer(
     var totalDragDistanceX by remember { mutableFloatStateOf(0f) }
     var totalDragDistanceY by remember { mutableFloatStateOf(0f) }
 
-    // אזור הסליידר - 20% תחתונים של המסך כשהcontrol מוצג
-    var sliderAreaTop by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var screenHeight by remember { mutableFloatStateOf(0f) }
+    var isMirrored by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(false) }
+
+    val speedOptions = listOf(0.25f, 0.5f, 1f, 1.5f, 2f, 4f)
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -100,7 +123,7 @@ fun VideoPlayer(
     }
 
     LaunchedEffect(uri) {
-        hasEnded = false
+        mediaGeneration++
         isDragging = false
         isSliderDragging = false
         showSeekIndicator = false
@@ -108,25 +131,51 @@ fun VideoPlayer(
         showBrightnessIndicator = false
         showActionMenu = false
         isControlsVisible = false
+        currentPosition = 0L
+        duration = 0L
 
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
-        val mediaItem = MediaItem.fromUri(uri)
+        val uriStr = uri.toString().lowercase()
+        // Detect HLS by file extension at end of path, not substring match
+        val ext = uriStr.substringAfterLast('.', "").substringBefore('?')
+        // Also detect by filename containing m3u8 (e.g., "playlist_m3u8" with no extension)
+        val lastSegment = uri.lastPathSegment?.lowercase() ?: ""
+        val isHls = ext == "m3u8" || ext == "m3u" ||
+            (lastSegment.contains("m3u8") || lastSegment.contains("m3u")) && ext != "ts" ||
+            detectHlsFromContent(context, uri)
+        Log.w("VideoPlayer", "Loading URI: $uri ext=$ext lastSeg=$lastSegment isHls=$isHls")
+        val mediaItem = when {
+            isHls ->
+                MediaItem.Builder()
+                    .setUri(uri)
+                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .build()
+            ext == "mpd" ->
+                MediaItem.Builder()
+                    .setUri(uri)
+                    .setMimeType(MimeTypes.APPLICATION_MPD)
+                    .build()
+            else -> MediaItem.fromUri(uri)
+        }
+        Log.w("VideoPlayer", "MediaItem MIME: ${mediaItem.localConfiguration?.mimeType ?: "auto"}")
         exoPlayer.setMediaItem(mediaItem)
         exoPlayer.seekTo(0)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
-        delay(200)
-        exoPlayer.play()
     }
 
     LaunchedEffect(isLooping) {
         exoPlayer.repeatMode = if (isLooping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    LaunchedEffect(isControlsVisible, isDragging) {
+    LaunchedEffect(playbackSpeed) {
+        exoPlayer.setPlaybackSpeed(playbackSpeed)
+    }
+
+    LaunchedEffect(isControlsVisible, isDragging, isSliderDragging) {
         if (isControlsVisible && !isDragging && !isSliderDragging) {
-            delay(3000)
+            delay(4000)
             isControlsVisible = false
         }
     }
@@ -138,9 +187,14 @@ fun VideoPlayer(
                 duration = exoPlayer.duration.coerceAtLeast(0L)
                 isPlaying = exoPlayer.isPlaying
 
-                if (exoPlayer.playbackState == Player.STATE_ENDED && !isLooping && !hasEnded) {
-                    hasEnded = true
-                    delay(200)
+                if (exoPlayer.playbackState == Player.STATE_ENDED &&
+                    !isLooping &&
+                    endHandledForGeneration != mediaGeneration &&
+                    duration > 0 &&
+                    currentPosition > 0
+                ) {
+                    endHandledForGeneration = mediaGeneration
+                    delay(300)
                     onNext()
                 }
             }
@@ -161,151 +215,166 @@ fun VideoPlayer(
             .background(Color.Black)
             .onGloballyPositioned { coordinates ->
                 screenHeight = coordinates.size.height.toFloat()
-                // הסליידר נמצא ב-20% תחתונים כשה-controls מוצגים
-                sliderAreaTop = screenHeight * 0.8f
             }
     ) {
-        // שכבת הווידאו
+        // Video layer
         AndroidView(
-            factory = {
-                PlayerView(context).apply {
-                    player = exoPlayer
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            factory = { ctx ->
+                val textureView = TextureView(ctx).apply {
                     layoutParams = FrameLayout.LayoutParams(-1, -1)
                 }
+                exoPlayer.setVideoTextureView(textureView)
+                textureView
+            },
+            update = { tv ->
+                tv.scaleX = if (isMirrored) -1f else 1f
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // שכבת gesture detection
+        // Gesture layer — only active when controls are HIDDEN
+        // When controls visible, the overlay handles dismissal internally
+        if (!isControlsVisible) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { offset ->
-                            val width = size.width
-                            when {
-                                offset.x < width * 0.3 -> if (navigationMode == "TAP") onPrev()
-                                offset.x > width * 0.7 -> if (navigationMode == "TAP") onNext()
-                                else -> isControlsVisible = !isControlsVisible
-                            }
-                        },
-                        onDoubleTap = { offset ->
-                            // DOUBLE TAP לקפיצת 10 שניות
-                            val width = size.width
-                            when {
-                                offset.x < width * 0.3 -> {
-                                    // Double tap שמאל = -10 שניות
-                                    val newPos = (currentPosition - 10000).coerceAtLeast(0)
-                                    exoPlayer.seekTo(newPos)
-                                }
-                                offset.x > width * 0.7 -> {
-                                    // Double tap ימין = +10 שניות
-                                    val newPos = (currentPosition + 10000).coerceAtMost(duration)
-                                    exoPlayer.seekTo(newPos)
-                                }
-                                else -> {
-                                    // Double tap באמצע = toggle controls
-                                    isControlsVisible = !isControlsVisible
-                                }
-                            }
-                        },
-                        onLongPress = { showActionMenu = true }
-                    )
-                }
-                .pointerInput(navigationMode, isControlsVisible) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            // בדיקה אם המגע בתוך אזור הסליידר
-                            val isInSliderArea = isControlsVisible && offset.y > sliderAreaTop
+                .pointerInput(navigationMode) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val downTime = System.currentTimeMillis()
+                        val downPos = down.position
 
-                            if (!isInSliderArea) {
-                                isDragging = true
-                                seekStartPosition = currentPosition
-                                startVolume = getCurrentVolume(context)
-                                startBrightness = getCurrentBrightness(context)
-                                totalDragDistanceX = 0f
-                                totalDragDistanceY = 0f
-                                isSeekMode = false
-                            }
-                        },
-                        onDragEnd = {
-                            if (isDragging) {
-                                // SEEK - משחרר אצבע, קופץ לזמן החדש
-                                if (isSeekMode && showSeekIndicator) {
-                                    exoPlayer.seekTo(seekPreviewTime)
-                                    if (!exoPlayer.isPlaying) exoPlayer.play()
-                                }
+                        seekStartPosition = currentPosition
+                        startVolume = getCurrentVolume(context)
+                        startBrightness = getCurrentBrightness(context)
+                        totalDragDistanceX = 0f
+                        totalDragDistanceY = 0f
+                        isSeekMode = false
 
-                                scope.launch {
-                                    delay(500)
-                                    showSeekIndicator = false
-                                    showVolumeIndicator = false
-                                    showBrightnessIndicator = false
+                        var dragStarted = false
+                        var gestureHandled = false
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            if (change.changedToUp()) {
+                                val upTime = System.currentTimeMillis()
+                                val elapsed = upTime - downTime
+
+                                if (dragStarted && !isControlsVisible) {
+                                    // Drag finished
+                                    if (isSeekMode && showSeekIndicator) {
+                                        exoPlayer.seekTo(seekPreviewTime)
+                                        if (!exoPlayer.isPlaying) exoPlayer.play()
+                                    }
+                                    scope.launch {
+                                        delay(500)
+                                        showSeekIndicator = false
+                                        showVolumeIndicator = false
+                                        showBrightnessIndicator = false
+                                    }
                                     isDragging = false
+                                    gestureHandled = true
+                                } else if (elapsed > 400 && !dragStarted) {
+                                    // Long press
+                                    showActionMenu = true
+                                    gestureHandled = true
                                 }
-                            }
-                        },
-                        onDragCancel = {
-                            showSeekIndicator = false
-                            showVolumeIndicator = false
-                            showBrightnessIndicator = false
-                            isDragging = false
-                        }
-                    ) { change, dragAmount ->
-                        if (!isDragging) return@detectDragGestures
 
-                        val (dx, dy) = dragAmount
-                        totalDragDistanceX += dx
-                        totalDragDistanceY += dy
-
-                        if (!isSeekMode && !showVolumeIndicator && !showBrightnessIndicator) {
-                            if (abs(totalDragDistanceX) > abs(totalDragDistanceY)) {
-                                if (abs(totalDragDistanceX) > 10) isSeekMode = true
-                            } else {
-                                if (abs(totalDragDistanceY) > 10) {
-                                    isSeekMode = false
-                                    val isRightSide = change.position.x > size.width / 2
-                                    if (isRightSide) {
-                                        showBrightnessIndicator = true
-                                        currentBrightnessLevel = startBrightness
+                                if (!gestureHandled) {
+                                    // Could be tap or first tap of double-tap
+                                    // Wait briefly for possible second tap
+                                    val secondDown = withTimeoutOrNull(300) {
+                                        awaitFirstDown(requireUnconsumed = false)
+                                    }
+                                    if (secondDown != null) {
+                                        // Double tap detected — wait for its up
+                                        while (true) {
+                                            val ev = awaitPointerEvent()
+                                            if (ev.changes.firstOrNull()?.changedToUp() == true) break
+                                        }
+                                        val width = size.width
+                                        when {
+                                            downPos.x < width * 0.3 -> onPrev()
+                                            downPos.x > width * 0.7 -> onNext()
+                                            else -> isControlsVisible = !isControlsVisible
+                                        }
                                     } else {
-                                        showVolumeIndicator = true
-                                        currentVolumeLevel = startVolume
+                                        // Single tap
+                                        Log.w("VideoPlayer", "TAP: toggling controls ${!isControlsVisible}")
+                                        isControlsVisible = !isControlsVisible
+                                    }
+                                }
+                                break
+                            }
+
+                            val dragDelta = change.positionChange()
+                            if (dragDelta == androidx.compose.ui.geometry.Offset.Zero) continue
+
+                            // Only handle drags when controls are hidden
+                            if (isControlsVisible) continue
+
+                            totalDragDistanceX += dragDelta.x
+                            totalDragDistanceY += dragDelta.y
+
+                            val totalAbsX = abs(totalDragDistanceX)
+                            val totalAbsY = abs(totalDragDistanceY)
+
+                            if (!dragStarted && (totalAbsX > 15 || totalAbsY > 15)) {
+                                dragStarted = true
+                                isDragging = true
+                                change.consume()
+                            }
+
+                            if (!dragStarted) continue
+                            change.consume()
+
+                            if (!isSeekMode && !showVolumeIndicator && !showBrightnessIndicator) {
+                                if (totalAbsX > totalAbsY) {
+                                    if (totalAbsX > 10) isSeekMode = true
+                                } else {
+                                    if (totalAbsY > 10) {
+                                        isSeekMode = false
+                                        val isRightSide = change.position.x > size.width / 2
+                                        if (isRightSide) {
+                                            showBrightnessIndicator = true
+                                            currentBrightnessLevel = startBrightness
+                                        } else {
+                                            showVolumeIndicator = true
+                                            currentVolumeLevel = startVolume
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if (isSeekMode) {
-                            val seekSensitivity = 150f
-                            // הפיכת הכיוון: שמאלה=קדימה, ימינה=אחורה
-                            val seekDelta = (-totalDragDistanceX * seekSensitivity).toLong()
-                            seekPreviewTime = (seekStartPosition + seekDelta).coerceIn(0, duration)
-                            showSeekIndicator = true
-                            showVolumeIndicator = false
-                            showBrightnessIndicator = false
-                        } else {
-                            val sensitivity = 2000f
-                            val deltaPercent = -totalDragDistanceY / sensitivity
+                            if (isSeekMode) {
+                                val seekSensitivity = 150f
+                                val seekDelta = (totalDragDistanceX * seekSensitivity).toLong()
+                                seekPreviewTime = (seekStartPosition + seekDelta).coerceIn(0, duration)
+                                showSeekIndicator = true
+                                showVolumeIndicator = false
+                                showBrightnessIndicator = false
+                            } else {
+                                val sensitivity = 2000f
+                                val deltaPercent = -totalDragDistanceY / sensitivity
 
-                            if (showBrightnessIndicator) {
-                                val newBrightness = (startBrightness + deltaPercent).coerceIn(0f, 1f)
-                                setAppBrightness(context, newBrightness)
-                                currentBrightnessLevel = newBrightness
-                            } else if (showVolumeIndicator) {
-                                val newVolume = (startVolume + deltaPercent).coerceIn(0f, 1f)
-                                setAppVolume(context, newVolume)
-                                currentVolumeLevel = newVolume
+                                if (showBrightnessIndicator) {
+                                    val newBrightness = (startBrightness + deltaPercent).coerceIn(0f, 1f)
+                                    setAppBrightness(context, newBrightness)
+                                    currentBrightnessLevel = newBrightness
+                                } else if (showVolumeIndicator) {
+                                    val newVolume = (startVolume + deltaPercent).coerceIn(0f, 1f)
+                                    setAppVolume(context, newVolume)
+                                    currentVolumeLevel = newVolume
+                                }
                             }
                         }
                     }
                 }
         )
+        }
 
-        // Controls overlay
+        // Controls overlay — single AnimatedVisibility with ALL controls including seek bar
         AnimatedVisibility(
             visible = isControlsVisible,
             enter = fadeIn(),
@@ -315,150 +384,410 @@ fun VideoPlayer(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(0.4f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { isControlsVisible = false }
+                    .background(Color.Black.copy(0.45f))
             ) {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        IconButton(onClick = { isLooping = !isLooping }) {
-                            Icon(
-                                if (isLooping) Icons.Default.RepeatOne else Icons.Default.Repeat,
-                                "Loop",
-                                tint = if (isLooping) MaterialTheme.colorScheme.primary else Color.White
+                // Dismissal layer — first child (lowest z). Taps on empty space dismiss controls.
+                // Slider/buttons are later children (higher z) and get events first.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { isControlsVisible = false },
+                                onLongPress = { showActionMenu = true }
                             )
                         }
-                        IconButton(onClick = { isControlsVisible = false }) {
-                            Icon(Icons.Default.Close, "Close", tint = Color.White)
+                )
+
+                // Top controls
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left group
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.Black.copy(0.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ControlIconButton(
+                                icon = Icons.Default.RepeatOne,
+                                label = "Repeat",
+                                isActive = isLooping,
+                                onClick = { isLooping = !isLooping }
+                            )
+                            ControlIconButton(
+                                icon = Icons.Default.Repeat,
+                                label = "Repeat List",
+                                isActive = isRepeatListOn,
+                                onClick = onToggleRepeatList
+                            )
+                            ControlIconButton(
+                                icon = Icons.Default.Shuffle,
+                                label = "Shuffle",
+                                isActive = isShuffleOn,
+                                onClick = onToggleShuffle
+                            )
                         }
                     }
 
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        IconButton(
-                            onClick = {
-                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                                scope.launch { isControlsVisible = true }
-                            },
-                            modifier = Modifier.size(80.dp)
+                    // Right group
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.Black.copy(0.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            ControlIconButton(
+                                icon = Icons.Default.Flip,
+                                label = "Mirror",
+                                isActive = isMirrored,
+                                onClick = { isMirrored = !isMirrored }
+                            )
+                            ControlIconButton(
+                                icon = Icons.Default.ScreenRotation,
+                                label = "Rotate",
+                                isActive = false,
+                                onClick = {
+                                    val activity = context as? Activity ?: return@ControlIconButton
+                                    activity.requestedOrientation =
+                                        if (activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+                                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                        else
+                                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                }
+                            )
+                            ControlIconButton(
+                                icon = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                label = "Mute",
+                                isActive = isMuted,
+                                onClick = {
+                                    isMuted = !isMuted
+                                    exoPlayer.volume = if (isMuted) 0f else 1f
+                                }
+                            )
+                            // Speed
+                            Box {
+                                TextButton(
+                                    onClick = { showSpeedMenu = !showSpeedMenu },
+                                    modifier = Modifier.height(40.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                ) {
+                                    Text(
+                                        "${playbackSpeed}x",
+                                        color = if (playbackSpeed != 1f) Color(0xFF00E5FF) else Color.White.copy(0.7f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showSpeedMenu,
+                                    onDismissRequest = { showSpeedMenu = false }
+                                ) {
+                                    speedOptions.forEach { speed ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "${speed}x",
+                                                    fontWeight = if (speed == playbackSpeed) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (speed == playbackSpeed) Color(0xFF00E5FF) else Color.Unspecified
+                                                )
+                                            },
+                                            onClick = {
+                                                playbackSpeed = speed
+                                                showSpeedMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Center play controls
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(40.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { onPrev() },
+                        modifier = Modifier.size(52.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.SkipPrevious, "Previous",
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+
+                    Surface(
+                        onClick = {
+                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            scope.launch { isControlsVisible = true }
+                        },
+                        shape = CircleShape,
+                        color = Color.White.copy(0.15f),
+                        modifier = Modifier.size(72.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 "Play/Pause",
                                 tint = Color.White,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.size(44.dp)
                             )
                         }
                     }
 
-                    // אזור הסליידר - ללא gesture detection!
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        val displayTime = if (isSliderDragging) sliderPosition else currentPosition
+                    IconButton(
+                        onClick = { onNext() },
+                        modifier = Modifier.size(52.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.SkipNext, "Next",
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(formatTime(displayTime), color = Color.White)
-                            Text(formatTime(duration), color = Color.White)
-                        }
-
-                        Slider(
-                            value = if (duration > 0) {
-                                if (isSliderDragging) sliderPosition.toFloat()
-                                else currentPosition.toFloat()
-                            } else 0f,
-                            onValueChange = { newValue ->
-                                isSliderDragging = true
-                                sliderPosition = newValue.toLong()
-                            },
-                            onValueChangeFinished = {
-                                exoPlayer.seekTo(sliderPosition)
-                                isSliderDragging = false
-                            },
-                            valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = Color.White.copy(0.5f)
+                // Bottom timeline with seek bar — inside the controls overlay
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(0.7f))
                             )
                         )
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 20.dp, top = 32.dp)
+                ) {
+                    val displayTime = if (isSliderDragging) sliderPosition else currentPosition
+
+                    // Custom seek bar — raw Canvas + pointerInput, no Compose Slider
+                    val trackHeight = 4.dp
+                    val thumbRadius = 8.dp
+                    val hitTargetHeight = 48.dp
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(hitTargetHeight)
+                            .pointerInput(duration) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = true)
+                                    down.consume()
+                                    isSliderDragging = true
+
+                                    // Calculate position from touch
+                                    val w = size.width.toFloat()
+                                    val fraction = (down.position.x / w).coerceIn(0f, 1f)
+                                    sliderPosition = (fraction * duration).toLong()
+
+                                    // Track drag
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (change.changedToUp()) {
+                                            change.consume()
+                                            Log.w("VideoPlayer", "SEEKBAR seek to $sliderPosition")
+                                            exoPlayer.seekTo(sliderPosition)
+                                            isSliderDragging = false
+                                            break
+                                        }
+                                        change.consume()
+                                        val dragFraction = (change.position.x / w).coerceIn(0f, 1f)
+                                        sliderPosition = (dragFraction * duration).toLong()
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(trackHeight)
+                        ) {
+                            val w = size.width
+                            val h = size.height
+                            val progress = if (duration > 0) {
+                                if (isSliderDragging) sliderPosition.toFloat() / duration
+                                else currentPosition.toFloat() / duration
+                            } else 0f
+                            val thumbX = w * progress
+                            val rPx = thumbRadius.toPx()
+
+                            // Track background
+                            drawRoundRect(
+                                color = Color.White.copy(0.2f),
+                                size = androidx.compose.ui.geometry.Size(w, h),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2)
+                            )
+                            // Track progress
+                            if (thumbX > 0) {
+                                drawRoundRect(
+                                    color = Color.White,
+                                    size = androidx.compose.ui.geometry.Size(thumbX, h),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2)
+                                )
+                            }
+                            // Thumb
+                            drawCircle(
+                                color = Color.White,
+                                radius = rPx,
+                                center = androidx.compose.ui.geometry.Offset(thumbX.coerceIn(rPx, w - rPx), h / 2)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(formatTime(displayTime), color = Color.White.copy(0.7f), fontSize = 12.sp)
+                        Text(formatTime(duration), color = Color.White.copy(0.4f), fontSize = 12.sp)
                     }
                 }
             }
         }
 
-        // Indicators
+        // Seek indicator
         AnimatedVisibility(
             visible = showSeekIndicator,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
-            Box(
-                modifier = Modifier
-                    .background(Color.Black.copy(0.8f), RoundedCornerShape(16.dp))
-                    .padding(24.dp)
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color.Black.copy(0.8f)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp)
+                ) {
                     val diff = seekPreviewTime - seekStartPosition
                     val sign = if (diff > 0) "+" else ""
                     Text(
                         formatTime(seekPreviewTime),
                         color = Color.White,
-                        style = MaterialTheme.typography.headlineLarge
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         "($sign${TimeUnit.MILLISECONDS.toSeconds(diff)}s)",
-                        color = if (diff > 0) Color.Green else Color.Red,
-                        style = MaterialTheme.typography.bodyMedium
+                        color = if (diff > 0) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                        fontSize = 14.sp
                     )
                 }
             }
         }
 
+        // Volume indicator
         AnimatedVisibility(
             visible = showVolumeIndicator,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterStart).padding(start = 30.dp)
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 20.dp)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.VolumeUp, null, tint = Color.White, modifier = Modifier.size(32.dp))
-                LinearProgressIndicator(
-                    progress = { currentVolumeLevel },
-                    modifier = Modifier.height(150.dp).width(12.dp).clip(RoundedCornerShape(6.dp)),
-                    color = Color.White
-                )
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.Black.copy(0.6f)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Icon(Icons.Default.VolumeUp, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { currentVolumeLevel },
+                        modifier = Modifier
+                            .height(100.dp)
+                            .width(5.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color.White,
+                        trackColor = Color.White.copy(0.15f)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("${(currentVolumeLevel * 100).toInt()}%", color = Color.White.copy(0.8f), fontSize = 11.sp)
+                }
             }
         }
 
+        // Brightness indicator
         AnimatedVisibility(
             visible = showBrightnessIndicator,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 30.dp)
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 20.dp)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Brightness6, null, tint = Color.Yellow, modifier = Modifier.size(32.dp))
-                LinearProgressIndicator(
-                    progress = { currentBrightnessLevel },
-                    modifier = Modifier.height(150.dp).width(12.dp).clip(RoundedCornerShape(6.dp)),
-                    color = Color.Yellow
-                )
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.Black.copy(0.6f)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Icon(Icons.Default.Brightness6, null, tint = Color.Yellow, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { currentBrightnessLevel },
+                        modifier = Modifier
+                            .height(100.dp)
+                            .width(5.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color.Yellow,
+                        trackColor = Color.White.copy(0.15f)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("${(currentBrightnessLevel * 100).toInt()}%", color = Color.White.copy(0.8f), fontSize = 11.sp)
+                }
             }
         }
 
         if (showActionMenu) {
             ActionMenuDialog(uri = uri, isVideo = true, onDismiss = { showActionMenu = false })
         }
+    }
+}
+
+@Composable
+private fun ControlIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(40.dp)
+    ) {
+        Icon(
+            icon, label,
+            tint = if (isActive) Color(0xFF00E5FF) else Color.White.copy(0.5f),
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -476,13 +805,13 @@ fun ActionMenuDialog(uri: Uri, isVideo: Boolean, onDismiss: () -> Unit) {
     val mediaInfo = remember { getMediaInfo(context, uri) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Media Options") },
+        title = { Text("Media Info", fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 InfoRow("Name:", mediaInfo.name)
                 InfoRow("Size:", mediaInfo.size)
                 InfoRow("Date:", mediaInfo.date)
-                Divider(Modifier.padding(vertical = 16.dp))
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
                 TextButton(onClick = { shareMedia(context, uri, isVideo); onDismiss() }) {
                     Icon(Icons.Default.Share, null)
                     Spacer(Modifier.width(8.dp))
@@ -495,7 +824,8 @@ fun ActionMenuDialog(uri: Uri, isVideo: Boolean, onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        shape = RoundedCornerShape(20.dp)
     )
 }
 
@@ -530,7 +860,6 @@ fun getMediaInfo(context: Context, uri: Uri): MediaInfo {
         }
         if (name.isEmpty()) name = uri.lastPathSegment ?: "Unknown"
     } catch (e: Exception) {
-        e.printStackTrace()
         name = "Error reading info"
     }
 
@@ -539,7 +868,8 @@ fun getMediaInfo(context: Context, uri: Uri): MediaInfo {
 
 fun formatFileSize(bytes: Long): String {
     val mb = bytes / (1024.0 * 1024.0)
-    return String.format("%.2f MB", mb)
+    return if (mb >= 1) String.format("%.1f MB", mb)
+    else String.format("%.0f KB", bytes / 1024.0)
 }
 
 fun getCurrentVolume(context: Context): Float {
@@ -586,8 +916,28 @@ fun openWith(context: Context, uri: Uri, isVideo: Boolean) {
     context.startActivity(Intent.createChooser(i, "Open"))
 }
 
+fun detectHlsFromContent(context: Context, uri: Uri): Boolean {
+    try {
+        if (uri.scheme == "file") {
+            val file = File(uri.path ?: return false)
+            if (file.exists() && file.length() < 1_000_000) { // Only check small files
+                val header = file.bufferedReader().use { it.readLine() }
+                return header?.trim() == "#EXTM3U"
+            }
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val header = stream.bufferedReader().readLine()
+                return header?.trim() == "#EXTM3U"
+            }
+        }
+    } catch (_: Exception) { }
+    return false
+}
+
 fun formatTime(ms: Long): String {
-    val m = TimeUnit.MILLISECONDS.toMinutes(ms)
+    val h = TimeUnit.MILLISECONDS.toHours(ms)
+    val m = TimeUnit.MILLISECONDS.toMinutes(ms) % 60
     val s = TimeUnit.MILLISECONDS.toSeconds(ms) % 60
-    return String.format("%02d:%02d", m, s)
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
+    else String.format("%02d:%02d", m, s)
 }

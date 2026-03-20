@@ -32,7 +32,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "gallery_db"
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .fallbackToDestructiveMigration() // במקרה של בעיה, תמחק ותיצור מחדש
             .build()
     }

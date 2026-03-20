@@ -38,4 +38,10 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun deleteItemsByPlaylistId(playlistId: Long)
+
+    @Query("UPDATE playlists SET isHidden = :hidden WHERE id = :playlistId")
+    suspend fun setPlaylistHidden(playlistId: Long, hidden: Boolean)
+
+    @Query("UPDATE playlists SET name = :name WHERE id = :playlistId")
+    suspend fun renamePlaylist(playlistId: Long, name: String)
 }

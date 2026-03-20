@@ -19,5 +19,7 @@ data class PlaylistEntity(
     val mediaFilterType: MediaFilterType = MediaFilterType.MIXED,
 
     // תמונת ייצוג - התמונה/ווידאו האחרון שנוסף
-    val thumbnailUri: String? = null
+    val thumbnailUri: String? = null,
+
+    val isHidden: Boolean = false
 )

@@ -2,36 +2,50 @@
 package com.example.customgalleryviewer.presentation
 
 import android.app.Activity
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.MediaStore
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -39,11 +53,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
+import com.example.customgalleryviewer.data.MediaFilterType
 import com.example.customgalleryviewer.presentation.components.ActionMenuDialog
 import com.example.customgalleryviewer.presentation.components.VideoPlayer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun PlayerScreen(
@@ -59,11 +77,20 @@ fun PlayerScreen(
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val mediaFilter by viewModel.mediaFilter.collectAsState()
+    val isShuffleOn by viewModel.isShuffleOn.collectAsState()
+    val isRepeatListOn by viewModel.isRepeatListOn.collectAsState()
+    val isBrowseMode by viewModel.isBrowseMode.collectAsState()
+    val browseItems by viewModel.browseItems.collectAsState()
+    val folderStack by viewModel.folderStack.collectAsState()
+    val playlistFolders by viewModel.playlistFolders.collectAsState()
     val context = LocalContext.current
 
     BackHandler(enabled = true) {
         if (!isGalleryMode) {
             viewModel.setGalleryMode(true)
+        } else if (isBrowseMode) {
+            viewModel.navigateBackInBrowse()
         } else {
             onBackToHome()
         }
@@ -86,26 +113,51 @@ fun PlayerScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isGalleryMode) {
-            GalleryGridView(
-                items = filteredGalleryItems,
-                currentUri = currentMedia,
-                columns = gridColumns,
-                searchQuery = searchQuery,
-                isLoading = isLoading,
-                onItemClick = { uri -> viewModel.jumpToItem(uri) },
-                onColumnsChange = { viewModel.setGridColumns(it) },
-                onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                onBackToHome = onBackToHome
-            )
+            if (isBrowseMode) {
+                FolderBrowseView(
+                    items = browseItems,
+                    folderStack = folderStack,
+                    columns = gridColumns,
+                    mediaFilter = mediaFilter,
+                    onFolderClick = { uri, name -> viewModel.openSubfolder(uri, name) },
+                    onFileClick = { uri -> viewModel.jumpToItem(uri) },
+                    onBack = { viewModel.navigateBackInBrowse() },
+                    onColumnsChange = { viewModel.setGridColumns(it) },
+                    onMediaFilterChange = { viewModel.setMediaFilter(it) },
+                    getFolderCover = { viewModel.getFolderCover(it) },
+                    onSetFolderCover = { folder, cover -> viewModel.setFolderCover(folder, cover) },
+                    getMediaFilesInFolder = { viewModel.getMediaFilesInFolder(it) }
+                )
+            } else {
+                GalleryGridView(
+                    items = filteredGalleryItems,
+                    currentUri = currentMedia,
+                    columns = gridColumns,
+                    searchQuery = searchQuery,
+                    isLoading = isLoading,
+                    mediaFilter = mediaFilter,
+                    playlistFolders = playlistFolders,
+                    onItemClick = { uri -> viewModel.jumpToItem(uri) },
+                    onColumnsChange = { viewModel.setGridColumns(it) },
+                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                    onMediaFilterChange = { viewModel.setMediaFilter(it) },
+                    onBackToHome = onBackToHome,
+                    onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) }
+                )
+            }
         } else {
             PlayerContentView(
                 currentMedia = currentMedia,
                 navigationMode = navigationMode,
+                isShuffleOn = isShuffleOn,
+                isRepeatListOn = isRepeatListOn,
                 onNext = { viewModel.onNext() },
                 onPrev = { viewModel.onPrevious() },
-                onToggleGallery = { viewModel.toggleGalleryMode() }
+                onToggleGallery = { viewModel.toggleGalleryMode() },
+                onToggleShuffle = { viewModel.toggleShuffle() },
+                onToggleRepeatList = { viewModel.toggleRepeatList() }
             )
         }
     }
@@ -119,128 +171,405 @@ fun GalleryGridView(
     columns: Int,
     searchQuery: String,
     isLoading: Boolean,
+    mediaFilter: MediaFilterType,
+    playlistFolders: List<Pair<Uri, String>> = emptyList(),
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
-    onBackToHome: () -> Unit
+    onMediaFilterChange: (MediaFilterType) -> Unit,
+    onBackToHome: () -> Unit,
+    onBrowseFolder: (Uri, String) -> Unit = { _, _ -> }
 ) {
     var showSearch by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    var localSort by remember { mutableStateOf("default") }
+    val gridState = rememberLazyGridState()
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    val context = LocalContext.current
+
+    // Cache video durations asynchronously
+    var durationCache by remember { mutableStateOf<Map<Uri, Long>>(emptyMap()) }
+    LaunchedEffect(items) {
+        withContext(Dispatchers.IO) {
+            val cache = mutableMapOf<Uri, Long>()
+            items.forEach { uri ->
+                if (isVideo(uri.toString())) {
+                    cache[uri] = getVideoDurationMs(context, uri)
+                }
+            }
+            durationCache = cache
+        }
+    }
+
+    // Local sort for this gallery view
+    val sortedItems = remember(items, localSort, durationCache) {
+        when (localSort) {
+            "name" -> items.sortedBy { it.lastPathSegment?.lowercase() ?: "" }
+            "name_desc" -> items.sortedByDescending { it.lastPathSegment?.lowercase() ?: "" }
+            "date" -> items.sortedByDescending {
+                try { java.io.File(it.path ?: "").lastModified() } catch (_: Exception) { 0L }
+            }
+            "size" -> items.sortedByDescending {
+                try { java.io.File(it.path ?: "").length() } catch (_: Exception) { 0L }
+            }
+            "length" -> items.sortedByDescending { durationCache[it] ?: 0L }
+            else -> items
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Clean top bar
         TopAppBar(
-            title = {
-                Text(
-                    if (isLoading) "Loading... ${items.size} files" else "Gallery - ${items.size} files",
-                    color = Color.White
-                )
-            },
+            title = {},
             navigationIcon = {
-                IconButton(onClick = onBackToHome) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                TextButton(onClick = onBackToHome) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack, null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Library", color = MaterialTheme.colorScheme.primary)
                 }
             },
             actions = {
-                IconButton(onClick = { showSearch = !showSearch }) {
-                    Icon(Icons.Default.Search, "Search", tint = Color.White)
+                Box {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(
+                            Icons.Default.Sort, "Sort",
+                            tint = if (localSort != "default") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(0.6f)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Default", fontWeight = if (localSort == "default") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "default"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Name A-Z", fontWeight = if (localSort == "name") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "name"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Name Z-A", fontWeight = if (localSort == "name_desc") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "name_desc"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Date (Newest)", fontWeight = if (localSort == "date") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "date"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Size (Largest)", fontWeight = if (localSort == "size") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "size"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Length (Longest)", fontWeight = if (localSort == "length") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { localSort = "length"; showSortMenu = false }
+                        )
+                    }
                 }
-                Text("Size", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
+                IconButton(onClick = { showSearch = !showSearch }) {
+                    Icon(
+                        Icons.Default.Search,
+                        "Search",
+                        tint = if (showSearch) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface.copy(0.6f)
+                    )
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.background
+            )
+        )
+
+        // Title + count
+        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+            Text(
+                if (isLoading) "Loading..." else "Gallery",
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                "${sortedItems.size} files",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+            )
+        }
+
+        // Segmented filter + grid size
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Segmented control for filter
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                val options = listOf(
+                    "All" to MediaFilterType.MIXED,
+                    "Photos" to MediaFilterType.PHOTOS_ONLY,
+                    "Videos" to MediaFilterType.VIDEO_ONLY
+                )
+                options.forEachIndexed { index, (label, type) ->
+                    SegmentedButton(
+                        selected = mediaFilter == type,
+                        onClick = { onMediaFilterChange(type) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.primary.copy(0.15f),
+                            activeContentColor = MaterialTheme.colorScheme.primary,
+                            inactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text(label, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Grid size control
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.GridView, null,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(0.4f),
+                    modifier = Modifier.size(16.dp)
+                )
                 Slider(
                     value = columns.toFloat(),
                     onValueChange = { onColumnsChange(it.toInt()) },
                     valueRange = 2f..8f,
                     steps = 5,
-                    modifier = Modifier.width(100.dp),
+                    modifier = Modifier.width(72.dp),
                     colors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,
                         activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = Color.White.copy(0.5f)
+                        inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(0.1f)
                     )
                 )
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black.copy(0.8f))
-        )
+            }
+        }
 
-        if (showSearch) {
+        // Search bar
+        AnimatedVisibility(visible = showSearch) {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("Search files...", color = Color.Gray) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                placeholder = { Text("Search files...", color = MaterialTheme.colorScheme.onSurface.copy(0.3f)) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary)
+                },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(Icons.Default.Clear, "Clear", tint = Color.White)
+                            Icon(Icons.Default.Clear, "Clear", tint = MaterialTheme.colorScheme.onSurface.copy(0.5f))
                         }
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.Gray
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                 ),
-                singleLine = true
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
             )
         }
 
-        if (items.isEmpty()) {
+        if (sortedItems.isEmpty() && playlistFolders.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (isLoading) {
-                        CircularProgressIndicator(color = Color.White)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Scanning files...", color = Color.White)
-                    } else {
-                        Icon(
-                            Icons.Default.PhotoLibrary,
-                            null,
-                            modifier = Modifier.size(64.dp),
-                            tint = Color.White.copy(0.6f)
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 3.dp
                         )
                         Spacer(Modifier.height(16.dp))
-                        Text("No files found", color = Color.White)
+                        Text(
+                            "Scanning files...",
+                            color = MaterialTheme.colorScheme.onSurface.copy(0.5f)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.PhotoLibrary, null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(0.15f)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "No files found",
+                            color = MaterialTheme.colorScheme.onSurface.copy(0.3f),
+                            fontSize = 15.sp
+                        )
                     }
                 }
             }
         } else {
+            // Show folder browse chips if there are folders
+            if (false && playlistFolders.isNotEmpty()) { // Hidden — show files only, no folder navigation
+                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                    Text(
+                        "Folders",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    val folderGridState = rememberLazyGridState()
+                    LazyVerticalGrid(
+                        state = folderGridState,
+                        columns = GridCells.Fixed(2),
+                        modifier = Modifier.heightIn(max = 200.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(playlistFolders.size) { index ->
+                            val (folderUri, folderName) = playlistFolders[index]
+                            Surface(
+                                onClick = { onBrowseFolder(folderUri, folderName) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Folder,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        folderName.substringAfterLast('/'),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(0.2f)
+                    )
+                }
+            }
+
+            // Apple Photos-style edge-to-edge grid
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Fixed(columns),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(2.dp)
+                contentPadding = PaddingValues(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+                verticalArrangement = Arrangement.spacedBy(1.5.dp)
             ) {
-                items(items) { uri ->
+                items(sortedItems) { uri ->
                     val isSelected = uri == currentUri
-                    val isVideo = isVideo(uri.toString())
-                    val context = LocalContext.current
+                    val isVideoItem = isVideo(uri.toString())
+                    val itemContext = LocalContext.current
+                    val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: ""
 
                     Box(
                         modifier = Modifier
-                            .padding(1.dp)
                             .aspectRatio(1f)
-                            .border(
-                                if (isSelected) 3.dp else 0.dp,
-                                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-                            )
+                            .clip(RoundedCornerShape(2.dp))
                             .clickable { onItemClick(uri) }
                     ) {
                         AsyncImage(
-                            model = ImageRequest.Builder(context)
+                            model = ImageRequest.Builder(itemContext)
                                 .data(uri)
                                 .decoderFactory(VideoFrameDecoder.Factory())
                                 .crossfade(true)
+                                .size(256)
                                 .build(),
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
-                            error = ColorPainter(Color.DarkGray)
+                            error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
                         )
-                        if (isVideo) {
-                            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.3f)))
-                            Icon(
-                                imageVector = Icons.Default.PlayCircle,
-                                contentDescription = null,
-                                tint = Color.White.copy(0.9f),
-                                modifier = Modifier.align(Alignment.Center).size(24.dp)
+
+                        // Bottom gradient with file name
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, Color.Black.copy(0.75f))
+                                    )
+                                )
+                                .padding(horizontal = 4.dp, vertical = 3.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    fileName,
+                                    color = Color.White,
+                                    fontSize = 8.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 10.sp
+                                )
+                                if (isVideoItem) {
+                                    val durationMs = durationCache[uri] ?: 0L
+                                    if (durationMs > 0) {
+                                        Text(
+                                            formatDuration(durationMs),
+                                            color = Color.White.copy(0.7f),
+                                            fontSize = 8.sp,
+                                            lineHeight = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Video play icon
+                        if (isVideoItem) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(3.dp)
+                                    .size(18.dp)
+                                    .background(Color.Black.copy(0.5f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow, null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+
+                        // Selection highlight
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .border(
+                                        3.dp,
+                                        MaterialTheme.colorScheme.primary,
+                                        RoundedCornerShape(2.dp)
+                                    )
                             )
                         }
                     }
@@ -250,14 +579,514 @@ fun GalleryGridView(
     }
 }
 
-// PlayerScreen.kt - PlayerContentView function only
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FolderBrowseView(
+    items: List<com.example.customgalleryviewer.data.GalleryItem>,
+    folderStack: List<Pair<Uri, String>>,
+    columns: Int,
+    mediaFilter: MediaFilterType,
+    onFolderClick: (Uri, String) -> Unit,
+    onFileClick: (Uri) -> Unit,
+    onBack: () -> Unit,
+    onColumnsChange: (Int) -> Unit,
+    onMediaFilterChange: (MediaFilterType) -> Unit,
+    getFolderCover: (Uri) -> Uri? = { null },
+    onSetFolderCover: (Uri, Uri) -> Unit = { _, _ -> },
+    getMediaFilesInFolder: (Uri) -> List<Uri> = { emptyList() }
+) {
+    val gridState = rememberLazyGridState()
+    val currentFolderName = folderStack.lastOrNull()?.second?.substringAfterLast('/') ?: "Browse"
+
+    // Sort state per browse session
+    var currentSort by remember { mutableStateOf("name") }
+    var showSortMenu by remember { mutableStateOf(false) }
+
+    val browseContext = LocalContext.current
+
+    // Cache video durations asynchronously
+    var browseDurationCache by remember { mutableStateOf<Map<Uri, Long>>(emptyMap()) }
+    LaunchedEffect(items) {
+        withContext(Dispatchers.IO) {
+            val cache = mutableMapOf<Uri, Long>()
+            items.filterIsInstance<com.example.customgalleryviewer.data.GalleryItem.MediaFile>().forEach {
+                if (isVideo(it.uri.toString())) {
+                    cache[it.uri] = getVideoDurationMs(browseContext, it.uri)
+                }
+            }
+            browseDurationCache = cache
+        }
+    }
+
+    // Sort the items
+    val sortedItems = remember(items, currentSort, browseDurationCache) {
+        val folders = items.filterIsInstance<com.example.customgalleryviewer.data.GalleryItem.Folder>()
+        val files = items.filterIsInstance<com.example.customgalleryviewer.data.GalleryItem.MediaFile>()
+        val sortedFiles = when (currentSort) {
+            "name" -> files.sortedBy { it.uri.lastPathSegment?.lowercase() ?: "" }
+            "name_desc" -> files.sortedByDescending { it.uri.lastPathSegment?.lowercase() ?: "" }
+            "date" -> files.sortedByDescending {
+                try { java.io.File(it.uri.path ?: "").lastModified() } catch (_: Exception) { 0L }
+            }
+            "size" -> files.sortedByDescending {
+                try { java.io.File(it.uri.path ?: "").length() } catch (_: Exception) { 0L }
+            }
+            "length" -> files.sortedByDescending { browseDurationCache[it.uri] ?: 0L }
+            else -> files
+        }
+        folders + sortedFiles
+    }
+
+    // Cover picker state
+    var coverPickerFolder by remember { mutableStateOf<com.example.customgalleryviewer.data.GalleryItem.Folder?>(null) }
+    var coverPickerFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = {},
+            navigationIcon = {
+                TextButton(onClick = { onBack() }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack, null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (folderStack.size <= 1) "Gallery" else folderStack.dropLast(1).last().second.substringAfterLast('/'),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            actions = {
+                Box {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(
+                            Icons.Default.Sort, "Sort",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Name A-Z", fontWeight = if (currentSort == "name") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { currentSort = "name"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Name Z-A", fontWeight = if (currentSort == "name_desc") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { currentSort = "name_desc"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Date (Newest)", fontWeight = if (currentSort == "date") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { currentSort = "date"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Size (Largest)", fontWeight = if (currentSort == "size") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { currentSort = "size"; showSortMenu = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Length (Longest)", fontWeight = if (currentSort == "length") FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { currentSort = "length"; showSortMenu = false }
+                        )
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.background
+            )
+        )
+
+        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+            Text(
+                currentFolderName,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            val folderCount = sortedItems.count { it is com.example.customgalleryviewer.data.GalleryItem.Folder }
+            val fileCount = sortedItems.count { it is com.example.customgalleryviewer.data.GalleryItem.MediaFile }
+            Text(
+                buildString {
+                    if (folderCount > 0) append("$folderCount folders")
+                    if (folderCount > 0 && fileCount > 0) append(" · ")
+                    if (fileCount > 0) append("$fileCount files")
+                },
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+            )
+        }
+
+        // Filter + grid size
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                val options = listOf(
+                    "All" to MediaFilterType.MIXED,
+                    "Photos" to MediaFilterType.PHOTOS_ONLY,
+                    "Videos" to MediaFilterType.VIDEO_ONLY
+                )
+                options.forEachIndexed { index, (label, type) ->
+                    SegmentedButton(
+                        selected = mediaFilter == type,
+                        onClick = { onMediaFilterChange(type) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.primary.copy(0.15f),
+                            activeContentColor = MaterialTheme.colorScheme.primary,
+                            inactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text(label, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.GridView, null,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(0.4f),
+                    modifier = Modifier.size(16.dp)
+                )
+                Slider(
+                    value = columns.toFloat(),
+                    onValueChange = { onColumnsChange(it.toInt()) },
+                    valueRange = 2f..8f,
+                    steps = 5,
+                    modifier = Modifier.width(72.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(0.1f)
+                    )
+                )
+            }
+        }
+
+        if (sortedItems.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.FolderOpen, null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(0.15f)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Empty folder",
+                        color = MaterialTheme.colorScheme.onSurface.copy(0.3f),
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+                verticalArrangement = Arrangement.spacedBy(1.5.dp)
+            ) {
+                items(sortedItems.size) { index ->
+                    when (val item = sortedItems[index]) {
+                        is com.example.customgalleryviewer.data.GalleryItem.Folder -> {
+                            val customCover = getFolderCover(item.uri)
+                            val displayThumb = customCover ?: item.thumbnailUri
+                            val scope = rememberCoroutineScope()
+
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .pointerInput(item.uri) {
+                                        detectTapGestures(
+                                            onTap = { onFolderClick(item.uri, item.name) },
+                                            onLongPress = {
+                                                // Load media files for cover picker
+                                                scope.launch(Dispatchers.IO) {
+                                                    val files = getMediaFilesInFolder(item.uri)
+                                                    withContext(Dispatchers.Main) {
+                                                        coverPickerFiles = files
+                                                        coverPickerFolder = item
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (displayThumb != null) {
+                                    val context = LocalContext.current
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(displayThumb)
+                                            .decoderFactory(VideoFrameDecoder.Factory())
+                                            .crossfade(true)
+                                            .size(256)
+                                            .build(),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                        error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                                    )
+                                }
+
+                                // Folder overlay
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    Color.Transparent,
+                                                    Color.Black.copy(0.7f)
+                                                )
+                                            )
+                                        )
+                                )
+
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Folder,
+                                        null,
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        item.name,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2
+                                    )
+                                    if (item.childCount > 0) {
+                                        Text(
+                                            "${item.childCount}",
+                                            color = Color.White.copy(0.6f),
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        is com.example.customgalleryviewer.data.GalleryItem.MediaFile -> {
+                            val isVideoItem = isVideo(item.uri.toString())
+                            val fileContext = LocalContext.current
+                            val fileName = item.uri.lastPathSegment?.substringAfterLast('/') ?: ""
+
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .clickable { onFileClick(item.uri) }
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(fileContext)
+                                        .data(item.uri)
+                                        .decoderFactory(VideoFrameDecoder.Factory())
+                                        .crossfade(true)
+                                        .size(256)
+                                        .build(),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                    error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+
+                                // Bottom gradient with file name + duration
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(Color.Transparent, Color.Black.copy(0.75f))
+                                            )
+                                        )
+                                        .padding(horizontal = 4.dp, vertical = 3.dp)
+                                ) {
+                                    Column {
+                                        Text(
+                                            fileName,
+                                            color = Color.White,
+                                            fontSize = 8.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            lineHeight = 10.sp
+                                        )
+                                        if (isVideoItem) {
+                                            val durationMs = browseDurationCache[item.uri] ?: 0L
+                                            if (durationMs > 0) {
+                                                Text(
+                                                    formatDuration(durationMs),
+                                                    color = Color.White.copy(0.7f),
+                                                    fontSize = 8.sp,
+                                                    lineHeight = 10.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Video play icon
+                                if (isVideoItem) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(3.dp)
+                                            .size(18.dp)
+                                            .background(Color.Black.copy(0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PlayArrow, null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
+
+                                // Show m3u8 indicator
+                                val ext = item.uri.toString().substringAfterLast('.', "").lowercase()
+                                if (ext == "m3u8" || ext == "m3u") {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(4.dp)
+                                            .background(Color(0xFF6C63FF).copy(0.85f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("HLS", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cover picker dialog
+        if (coverPickerFolder != null && coverPickerFiles.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = {
+                    coverPickerFolder = null
+                    coverPickerFiles = emptyList()
+                },
+                title = {
+                    Text(
+                        "Choose Cover",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            coverPickerFolder!!.name,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.heightIn(max = 400.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(coverPickerFiles.size) { idx ->
+                                val fileUri = coverPickerFiles[idx]
+                                val context = LocalContext.current
+                                Box(
+                                    modifier = Modifier
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            onSetFolderCover(coverPickerFolder!!.uri, fileUri)
+                                            coverPickerFolder = null
+                                            coverPickerFiles = emptyList()
+                                        }
+                                ) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(fileUri)
+                                            .decoderFactory(VideoFrameDecoder.Factory())
+                                            .crossfade(true)
+                                            .size(200)
+                                            .build(),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                        error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        coverPickerFolder = null
+                        coverPickerFiles = emptyList()
+                    }) {
+                        Text("Cancel")
+                    }
+                },
+                shape = RoundedCornerShape(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun MediaFilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(0.15f)
+        else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.height(32.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 14.dp)
+        ) {
+            Text(
+                label,
+                color = if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
 @Composable
 fun PlayerContentView(
     currentMedia: Uri?,
     navigationMode: String,
+    isShuffleOn: Boolean = false,
+    isRepeatListOn: Boolean = false,
     onNext: () -> Unit,
     onPrev: () -> Unit,
-    onToggleGallery: () -> Unit
+    onToggleGallery: () -> Unit,
+    onToggleShuffle: () -> Unit = {},
+    onToggleRepeatList: () -> Unit = {}
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
     var scale by remember { mutableFloatStateOf(1f) }
@@ -279,19 +1108,28 @@ fun PlayerContentView(
                     uri = uri,
                     onNext = onNext,
                     onPrev = onPrev,
+                    onToggleShuffle = onToggleShuffle,
+                    onToggleRepeatList = onToggleRepeatList,
+                    isShuffleOn = isShuffleOn,
+                    isRepeatListOn = isRepeatListOn,
                     navigationMode = navigationMode,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
+                // Image viewer
                 var isDraggingBrightness by remember { mutableStateOf(false) }
                 var startBrightness by remember { mutableFloatStateOf(0f) }
                 var currentBrightnessLevel by remember { mutableFloatStateOf(0.5f) }
                 var showBrightnessIndicator by remember { mutableStateOf(false) }
+                var totalDragDistanceX by remember { mutableFloatStateOf(0f) }
                 var totalDragDistanceY by remember { mutableFloatStateOf(0f) }
+                var dragDecided by remember { mutableStateOf(false) }
+                var swipeTriggered by remember { mutableStateOf(false) }
 
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .background(Color.Black)
                         .clipToBounds()
                         .pointerInput(scale) {
                             detectTransformGestures { _, pan, zoom, _ ->
@@ -336,20 +1174,20 @@ fun PlayerContentView(
                                 onLongPress = { showActionMenu = true }
                             )
                         }
-                        .pointerInput(scale) {
+                        .pointerInput(scale, navigationMode) {
                             detectDragGestures(
                                 onDragStart = { dragOffset ->
+                                    totalDragDistanceX = 0f
+                                    totalDragDistanceY = 0f
+                                    dragDecided = false
+                                    swipeTriggered = false
+                                    isDraggingBrightness = false
+
                                     if (scale == 1f) {
-                                        val isRightSide = dragOffset.x > size.width / 2
-                                        if (isRightSide) {
-                                            isDraggingBrightness = true
-                                            val activity = context as? Activity
-                                            if (activity != null) {
-                                                startBrightness = getCurrentBrightness(activity)
-                                                currentBrightnessLevel = startBrightness
-                                            }
-                                            totalDragDistanceY = 0f
-                                            showBrightnessIndicator = true
+                                        val activity = context as? Activity
+                                        if (activity != null) {
+                                            startBrightness = getCurrentBrightness(activity)
+                                            currentBrightnessLevel = startBrightness
                                         }
                                     }
                                 },
@@ -360,33 +1198,55 @@ fun PlayerContentView(
                                             showBrightnessIndicator = false
                                             isDraggingBrightness = false
                                         }
+                                    } else {
+                                        showBrightnessIndicator = false
+                                        isDraggingBrightness = false
                                     }
                                 },
                                 onDragCancel = {
                                     showBrightnessIndicator = false
                                     isDraggingBrightness = false
                                 }
-                            ) { _, dragAmount ->
+                            ) { change, dragAmount ->
+                                totalDragDistanceX += dragAmount.x
+                                totalDragDistanceY += dragAmount.y
+
                                 if (scale == 1f) {
-                                    if (isDraggingBrightness) {
-                                        totalDragDistanceY += dragAmount.y
-                                        val sensitivity = 2000f
-                                        val deltaPercent = -totalDragDistanceY / sensitivity
-                                        val newBrightness = (startBrightness + deltaPercent).coerceIn(0f, 1f)
-                                        val activity = context as? Activity
-                                        if (activity != null) {
-                                            setAppBrightness(activity, newBrightness)
-                                            currentBrightnessLevel = newBrightness
-                                        }
-                                    } else {
-                                        val (dx, _) = dragAmount
-                                        if (navigationMode == "SWIPE") {
-                                            if (dx < -50) onNext() else if (dx > 50) onPrev()
+                                    if (!dragDecided) {
+                                        val totalAbsX = abs(totalDragDistanceX)
+                                        val totalAbsY = abs(totalDragDistanceY)
+                                        if (totalAbsX > 30 || totalAbsY > 30) {
+                                            dragDecided = true
+                                            if (totalAbsX <= totalAbsY) {
+                                                val isRightSide = change.position.x > size.width / 2
+                                                if (isRightSide) {
+                                                    isDraggingBrightness = true
+                                                    showBrightnessIndicator = true
+                                                }
+                                            }
                                         }
                                     }
-                                } else {
-                                    val (dx, _) = dragAmount
-                                    if (dx < -100) onNext() else if (dx > 100) onPrev()
+
+                                    if (dragDecided) {
+                                        if (isDraggingBrightness) {
+                                            val sensitivity = 2000f
+                                            val deltaPercent = -totalDragDistanceY / sensitivity
+                                            val newBrightness = (startBrightness + deltaPercent).coerceIn(0f, 1f)
+                                            val activity = context as? Activity
+                                            if (activity != null) {
+                                                setAppBrightness(activity, newBrightness)
+                                                currentBrightnessLevel = newBrightness
+                                            }
+                                        } else if (navigationMode == "SWIPE" && !swipeTriggered) {
+                                            if (totalDragDistanceX < -120) {
+                                                swipeTriggered = true
+                                                onNext()
+                                            } else if (totalDragDistanceX > 120) {
+                                                swipeTriggered = true
+                                                onPrev()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -412,7 +1272,7 @@ fun PlayerContentView(
                                     .weight(0.3f)
                                     .fillMaxHeight()
                                     .clickable(
-                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        interactionSource = remember { MutableInteractionSource() },
                                         indication = null
                                     ) { onPrev() }
                             )
@@ -422,25 +1282,50 @@ fun PlayerContentView(
                                     .weight(0.3f)
                                     .fillMaxHeight()
                                     .clickable(
-                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        interactionSource = remember { MutableInteractionSource() },
                                         indication = null
                                     ) { onNext() }
                             )
                         }
                     }
 
-                    if (showBrightnessIndicator) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 30.dp)
+                    // Brightness indicator — frosted glass style
+                    AnimatedVisibility(
+                        visible = showBrightnessIndicator,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 24.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.Black.copy(0.6f)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.Brightness6, null, tint = Color.Yellow, modifier = Modifier.size(32.dp))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(14.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Brightness6, null,
+                                    tint = Color.Yellow,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(Modifier.height(8.dp))
                                 LinearProgressIndicator(
                                     progress = { currentBrightnessLevel },
-                                    modifier = Modifier.height(150.dp).width(12.dp),
-                                    color = Color.Yellow
+                                    modifier = Modifier
+                                        .height(100.dp)
+                                        .width(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = Color.Yellow,
+                                    trackColor = Color.White.copy(0.15f)
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "${(currentBrightnessLevel * 100).toInt()}%",
+                                    color = Color.White.copy(0.8f),
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -456,21 +1341,21 @@ fun PlayerContentView(
                 }
             }
 
-            IconButton(
-                onClick = onToggleGallery,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .background(Color.Black.copy(0.5f), MaterialTheme.shapes.small)
-            ) {
-                Icon(Icons.Default.GridView, "Gallery", tint = Color.White)
-            }
+            // Gallery toggle — only visible via back button (no floating icon)
         }
     }
 }
+
+private val videoExtensions = setOf("mp4", "mkv", "avi", "mov", "flv", "wmv", "3gp", "webm", "ts", "m4v", "mpg", "mpeg", "vob", "m3u8", "m3u", "f4v", "ogv", "divx", "asf", "rm", "rmvb", "m2ts", "mts", "rec", "mxf")
+
 fun isVideo(path: String): Boolean {
     val lowercasePath = path.lowercase(Locale.getDefault())
-    if (lowercasePath.endsWith(".mp4") || lowercasePath.endsWith(".mkv") || lowercasePath.endsWith(".mov")) return true
+    // Use last path segment for extension (avoids matching dir names like "foo.m3u8/playlist")
+    val lastSegment = lowercasePath.substringAfterLast('/').substringBefore('?')
+    val ext = lastSegment.substringAfterLast('.', "")
+    if (ext in videoExtensions) return true
+    // Detect HLS playlists by filename containing m3u8/m3u (e.g., "playlist_m3u8")
+    if (lastSegment.contains("m3u8") || lastSegment.contains("m3u")) return true
     val extension = MimeTypeMap.getFileExtensionFromUrl(path)
     return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)?.startsWith("video") == true
 }
@@ -484,4 +1369,41 @@ fun setAppBrightness(activity: Activity, percent: Float) {
     val lp = activity.window.attributes
     lp.screenBrightness = percent.coerceIn(0.01f, 1f)
     activity.window.attributes = lp
+}
+
+fun getVideoDurationMs(context: android.content.Context, uri: Uri): Long {
+    return try {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.Video.VideoColumns.DURATION),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION)
+                    if (idx >= 0) cursor.getLong(idx) else 0L
+                } else 0L
+            } ?: 0L
+        } else {
+            val retriever = MediaMetadataRetriever()
+            try {
+                val path = uri.path
+                if (path != null) {
+                    retriever.setDataSource(path)
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                } else 0L
+            } finally {
+                retriever.release()
+            }
+        }
+    } catch (_: Exception) { 0L }
+}
+
+fun formatDuration(ms: Long): String {
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
+    else String.format("%d:%02d", m, s)
 }

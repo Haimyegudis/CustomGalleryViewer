@@ -5,6 +5,7 @@ import android.net.Uri
 import com.example.customgalleryviewer.data.MediaCacheManager
 import com.example.customgalleryviewer.data.PlaylistDao
 import com.example.customgalleryviewer.data.PlaylistWithItems
+import com.example.customgalleryviewer.data.SettingsManager
 import com.example.customgalleryviewer.util.FileScanner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -17,22 +18,18 @@ import javax.inject.Singleton
 class MediaRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val cacheManager: MediaCacheManager,
+    private val settingsManager: SettingsManager,
     @ApplicationContext private val context: Context
 ) {
-    // יצירת instance של FileScanner
-    private val fileScanner = FileScanner(context, cacheManager)
+    private fun createScanner() = FileScanner(context, cacheManager, settingsManager.getShowHidden())
 
     fun getPlaylistsFlow(): Flow<List<PlaylistWithItems>> = playlistDao.getPlaylistsFlow()
 
-    /**
-     * מחזיר Flow שפולט באצ'ים של קבצים
-     * זה מאפשר לנגן להתחיל להציג מיד את הקבצים הראשונים
-     */
     fun getMediaFilesFlow(playlistId: Long): Flow<List<Uri>> = kotlinx.coroutines.flow.flow {
         val playlistWithItems = playlistDao.getPlaylistWithItems(playlistId)
 
         if (playlistWithItems != null) {
-            fileScanner.scanPlaylistItemsFlow(
+            createScanner().scanPlaylistItemsFlow(
                 items = playlistWithItems.items,
                 filter = playlistWithItems.playlist.mediaFilterType
             ).collect { batch ->
@@ -41,8 +38,18 @@ class MediaRepository @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    suspend fun getPlaylistWithItems(playlistId: Long) = playlistDao.getPlaylistWithItems(playlistId)
+
     suspend fun deletePlaylist(playlistId: Long) {
         playlistDao.deletePlaylist(playlistId)
+    }
+
+    suspend fun hidePlaylist(playlistId: Long, hidden: Boolean) {
+        playlistDao.setPlaylistHidden(playlistId, hidden)
+    }
+
+    suspend fun renamePlaylist(playlistId: Long, name: String) {
+        playlistDao.renamePlaylist(playlistId, name)
     }
 
     /**

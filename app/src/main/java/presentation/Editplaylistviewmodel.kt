@@ -112,6 +112,13 @@ class EditPlaylistViewModel @Inject constructor(
         _items.value = currentItems
     }
 
+    fun renamePlaylist(newName: String) {
+        _playlistName.value = newName
+        viewModelScope.launch {
+            playlistDao.renamePlaylist(currentPlaylistId, newName)
+        }
+    }
+
     fun savePlaylist() {
         viewModelScope.launch {
             val playlistWithItems = playlistDao.getPlaylistWithItems(currentPlaylistId)
