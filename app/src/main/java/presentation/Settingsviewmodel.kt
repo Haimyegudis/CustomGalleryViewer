@@ -68,4 +68,13 @@ class SettingsViewModel @Inject constructor(
             loadCacheInfo()
         }
     }
+
+    // Show Hidden Files
+    private val _showHidden = MutableStateFlow(settingsManager.getShowHidden())
+    val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
+
+    fun setShowHidden(show: Boolean) {
+        settingsManager.setShowHidden(show)
+        _showHidden.value = show
+    }
 }

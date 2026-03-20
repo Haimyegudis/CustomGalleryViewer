@@ -46,6 +46,7 @@ class NavigationController @Inject constructor(
             val sortedItems = when (settingsManager.getPlaybackSort()) {
                 SortOrder.BY_NAME -> sortByName(newItems)
                 SortOrder.BY_DATE -> sortByDate(newItems)
+                SortOrder.BY_SIZE, SortOrder.BY_DURATION -> newItems // sorted in ViewModel
                 SortOrder.RANDOM -> newItems
             }
 
@@ -124,7 +125,7 @@ class NavigationController @Inject constructor(
                 currentHistoryIndex = history.lastIndex
                 updateMediaFromHistory()
             }
-            SortOrder.BY_NAME, SortOrder.BY_DATE -> {
+            SortOrder.BY_NAME, SortOrder.BY_DATE, SortOrder.BY_SIZE, SortOrder.BY_DURATION -> {
                 // Sequential navigation
                 val currentIndex = if (history.isEmpty()) -1 else history[currentHistoryIndex]
                 val nextIndex = (currentIndex + 1) % masterList.size
@@ -148,7 +149,6 @@ class NavigationController @Inject constructor(
                 return
             }
 
-            // תיקון: שימוש ב-getPlaybackSort
             when (settingsManager.getPlaybackSort()) {
                 SortOrder.RANDOM -> {
                     if (currentHistoryIndex > 0) {
@@ -157,7 +157,7 @@ class NavigationController @Inject constructor(
                         currentHistoryIndex = history.lastIndex
                     }
                 }
-                SortOrder.BY_NAME, SortOrder.BY_DATE -> {
+                SortOrder.BY_NAME, SortOrder.BY_DATE, SortOrder.BY_SIZE, SortOrder.BY_DURATION -> {
                     val currentIndex = history[currentHistoryIndex]
                     val prevIndex = if (currentIndex - 1 < 0) masterList.size - 1 else currentIndex - 1
 

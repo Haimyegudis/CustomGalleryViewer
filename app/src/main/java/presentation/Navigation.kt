@@ -23,6 +23,9 @@ fun NavigationGraph(navController: NavHostController) {
                 },
                 onNavigateToEdit = { playlistId ->
                     navController.navigate("edit_playlist/$playlistId")
+                },
+                onNavigateToDeviceFolder = { bucketId ->
+                    navController.navigate("device_folder/$bucketId")
                 }
             )
         }
@@ -32,7 +35,21 @@ fun NavigationGraph(navController: NavHostController) {
             arguments = listOf(navArgument("playlistId") { type = NavType.LongType })
         ) { backStackEntry ->
             val playlistId = backStackEntry.arguments?.getLong("playlistId") ?: 0L
-            PlayerScreen(playlistId = playlistId)
+            PlayerScreen(
+                playlistId = playlistId,
+                onBackToHome = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            "device_folder/{bucketId}",
+            arguments = listOf(navArgument("bucketId") { type = NavType.LongType })
+        ) { backStackEntry ->
+            val bucketId = backStackEntry.arguments?.getLong("bucketId") ?: 0L
+            DeviceFolderScreen(
+                bucketId = bucketId,
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(

@@ -1,22 +1,26 @@
 package com.example.customgalleryviewer.presentation
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.customgalleryviewer.data.SortOrder
 
-// SettingsScreen.kt - add button to clear cache at top
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -27,26 +31,29 @@ fun SettingsScreen(
     val gallerySort by viewModel.gallerySort.collectAsState()
     val currentNavMode by viewModel.navigationMode.collectAsState()
     val cacheInfo by viewModel.cacheInfo.collectAsState()
+    val showHidden by viewModel.showHidden.collectAsState()
 
     var showClearCacheDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = {},
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) { Icon(Icons.Default.ArrowBack, "Back") }
-                },
-                actions = {
-                    TextButton(
-                        onClick = { showClearCacheDialog = true },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Icon(Icons.Default.Delete, "Clear Cache", modifier = Modifier.size(18.dp))
+                    TextButton(onClick = onBackClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack, null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
                         Spacer(Modifier.width(4.dp))
-                        Text("Clear Cache")
+                        Text("Back", color = MaterialTheme.colorScheme.primary)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { padding ->
@@ -54,132 +61,269 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("Gallery Display Order", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("How images appear in grid view", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+            // Large title
+            Text(
+                "Settings",
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
 
-            SortOrderOption("By Name", "Alphabetical", gallerySort == SortOrder.BY_NAME) { viewModel.setGallerySort(SortOrder.BY_NAME) }
-            Spacer(Modifier.height(4.dp))
-            SortOrderOption("By Date", "Newest First", gallerySort == SortOrder.BY_DATE) { viewModel.setGallerySort(SortOrder.BY_DATE) }
+            Spacer(Modifier.height(16.dp))
 
-            Divider(Modifier.padding(vertical = 16.dp))
+            // Gallery Display Order
+            SectionHeader("GALLERY DISPLAY")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                SelectableRow(
+                    title = "By Name",
+                    subtitle = "Alphabetical order",
+                    isSelected = gallerySort == SortOrder.BY_NAME,
+                    onClick = { viewModel.setGallerySort(SortOrder.BY_NAME) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Date",
+                    subtitle = "Newest first",
+                    isSelected = gallerySort == SortOrder.BY_DATE,
+                    onClick = { viewModel.setGallerySort(SortOrder.BY_DATE) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Size",
+                    subtitle = "Largest first",
+                    isSelected = gallerySort == SortOrder.BY_SIZE,
+                    onClick = { viewModel.setGallerySort(SortOrder.BY_SIZE) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Duration",
+                    subtitle = "Longest videos first",
+                    isSelected = gallerySort == SortOrder.BY_DURATION,
+                    onClick = { viewModel.setGallerySort(SortOrder.BY_DURATION) }
+                )
+            }
 
-            Text("Playback Sequence", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("Order when swiping/tapping next", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+            Spacer(Modifier.height(24.dp))
 
-            SortOrderOption("By Name", "Alphabetical", playbackSort == SortOrder.BY_NAME) { viewModel.setPlaybackSort(SortOrder.BY_NAME) }
-            Spacer(Modifier.height(4.dp))
-            SortOrderOption("By Date", "Newest First", playbackSort == SortOrder.BY_DATE) { viewModel.setPlaybackSort(SortOrder.BY_DATE) }
-            Spacer(Modifier.height(4.dp))
-            SortOrderOption("Random", "Shuffle all media", playbackSort == SortOrder.RANDOM) { viewModel.setPlaybackSort(SortOrder.RANDOM) }
+            // Playback Sequence
+            SectionHeader("PLAYBACK SEQUENCE")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                SelectableRow(
+                    title = "By Name",
+                    subtitle = "Alphabetical order",
+                    isSelected = playbackSort == SortOrder.BY_NAME,
+                    onClick = { viewModel.setPlaybackSort(SortOrder.BY_NAME) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Date",
+                    subtitle = "Newest first",
+                    isSelected = playbackSort == SortOrder.BY_DATE,
+                    onClick = { viewModel.setPlaybackSort(SortOrder.BY_DATE) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Size",
+                    subtitle = "Largest first",
+                    isSelected = playbackSort == SortOrder.BY_SIZE,
+                    onClick = { viewModel.setPlaybackSort(SortOrder.BY_SIZE) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "By Duration",
+                    subtitle = "Longest videos first",
+                    isSelected = playbackSort == SortOrder.BY_DURATION,
+                    onClick = { viewModel.setPlaybackSort(SortOrder.BY_DURATION) }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "Random",
+                    subtitle = "Shuffle all media",
+                    isSelected = playbackSort == SortOrder.RANDOM,
+                    onClick = { viewModel.setPlaybackSort(SortOrder.RANDOM) }
+                )
+            }
 
-            Divider(Modifier.padding(vertical = 16.dp))
+            Spacer(Modifier.height(24.dp))
 
-            Text("Navigation Style", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
+            // Navigation Style
+            SectionHeader("NAVIGATION")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                SelectableRow(
+                    title = "Tap",
+                    subtitle = "Tap sides to navigate",
+                    isSelected = currentNavMode == "TAP",
+                    onClick = { viewModel.setNavigationMode("TAP") }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "Swipe",
+                    subtitle = "Swipe to navigate",
+                    isSelected = currentNavMode == "SWIPE",
+                    onClick = { viewModel.setNavigationMode("SWIPE") }
+                )
+            }
 
-            SortOrderOption("Tap", "Tap sides to navigate", currentNavMode == "TAP") { viewModel.setNavigationMode("TAP") }
-            Spacer(Modifier.height(4.dp))
-            SortOrderOption("Swipe", "Swipe screen to navigate", currentNavMode == "SWIPE") { viewModel.setNavigationMode("SWIPE") }
+            Spacer(Modifier.height(24.dp))
 
-            Divider(Modifier.padding(vertical = 16.dp))
-
-            Text("Cache Management", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text("Speed up loading by caching scanned folders", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Cached Folders", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "${cacheInfo.size} folders • ${cacheInfo.values.sumOf { it.fileCount }} files",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { showClearCacheDialog = true },
-                            enabled = cacheInfo.isNotEmpty()
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                "Clear Cache",
-                                tint = if (cacheInfo.isNotEmpty())
-                                    MaterialTheme.colorScheme.error
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                            )
-                        }
-                    }
-
-                    if (cacheInfo.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
+            // Files
+            SectionHeader("FILES")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.setShowHidden(!showHidden) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show Hidden Files", fontSize = 16.sp)
                         Text(
-                            "Cache saves time on next load. Clear if folders content changed.",
-                            style = MaterialTheme.typography.bodySmall,
+                            "Show files and folders starting with '.'",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = showHidden,
+                        onCheckedChange = { viewModel.setShowHidden(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary.copy(0.3f)
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Cache
+            SectionHeader("STORAGE")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = cacheInfo.isNotEmpty()) {
+                            showClearCacheDialog = true
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Clear Cache",
+                            fontSize = 16.sp,
+                            color = if (cacheInfo.isNotEmpty())
+                                MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface.copy(0.3f)
+                        )
+                        Text(
+                            "${cacheInfo.size} folders cached",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (cacheInfo.isNotEmpty()) {
+                        Text(
+                            "${cacheInfo.values.sumOf { it.fileCount }} files",
+                            fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
+
+            Spacer(Modifier.height(40.dp))
         }
     }
 
     if (showClearCacheDialog) {
         AlertDialog(
             onDismissRequest = { showClearCacheDialog = false },
-            title = { Text("Clear Cache?") },
+            title = { Text("Clear Cache?", fontWeight = FontWeight.SemiBold) },
             text = {
-                Text("This will remove all cached folder data. Next scan will be slower but will pick up any new files.")
+                Text(
+                    "Cached folder data will be removed. The next scan may take longer.",
+                    color = MaterialTheme.colorScheme.onSurface.copy(0.7f)
+                )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.clearCache()
-                        showClearCacheDialog = false
-                    }
-                ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = {
+                    viewModel.clearCache()
+                    showClearCacheDialog = false
+                }) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearCacheDialog = false }) {
                     Text("Cancel")
                 }
-            }
+            },
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }
 
 @Composable
-fun SortOrderOption(title: String, description: String, isSelected: Boolean, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurface.copy(0.4f),
+        letterSpacing = 0.5.sp,
+        modifier = Modifier.padding(start = 36.dp, bottom = 8.dp)
+    )
+}
+
+@Composable
+private fun InsetDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 16.dp),
+        color = MaterialTheme.colorScheme.outline
+    )
+}
+
+@Composable
+private fun SelectableRow(
+    title: String,
+    subtitle: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, style = MaterialTheme.typography.bodyLarge)
-                Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (isSelected) {
-                Icon(Icons.Default.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
+            )
+            Text(
+                subtitle,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (isSelected) {
+            Icon(
+                Icons.Default.Check, "Selected",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }

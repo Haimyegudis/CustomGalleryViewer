@@ -17,10 +17,11 @@ class SettingsManager @Inject constructor(
         context.getSharedPreferences("gallery_settings", Context.MODE_PRIVATE)
 
     companion object {
-        private const val KEY_PLAYBACK_SORT = "playback_sort_order" // שינינו שם לבהירות
-        private const val KEY_GALLERY_SORT = "gallery_sort_order"   // חדש
+        private const val KEY_PLAYBACK_SORT = "playback_sort_order"
+        private const val KEY_GALLERY_SORT = "gallery_sort_order"
         private const val KEY_NAV_MODE = "navigation_mode"
         private const val KEY_GRID_COLUMNS = "grid_columns"
+        private const val KEY_SHOW_HIDDEN = "show_hidden_files"
     }
 
     // --- Playback Sort (Random / Name / Date) ---
@@ -46,7 +47,6 @@ class SettingsManager @Inject constructor(
     val gallerySortFlow: StateFlow<SortOrder> = _gallerySortFlow.asStateFlow()
 
     fun setGallerySort(order: SortOrder) {
-        // בגלריה לא נאפשר RANDOM, אם נשלח בטעות נשנה ל-NAME
         val validOrder = if (order == SortOrder.RANDOM) SortOrder.BY_NAME else order
         prefs.edit().putString(KEY_GALLERY_SORT, validOrder.name).apply()
         _gallerySortFlow.value = validOrder
@@ -73,4 +73,15 @@ class SettingsManager @Inject constructor(
     }
 
     fun getGridColumns(): Int = prefs.getInt(KEY_GRID_COLUMNS, 3)
+
+    // --- Show Hidden Files ---
+    private val _showHiddenFlow = MutableStateFlow(getShowHidden())
+    val showHiddenFlow: StateFlow<Boolean> = _showHiddenFlow.asStateFlow()
+
+    fun setShowHidden(show: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_HIDDEN, show).apply()
+        _showHiddenFlow.value = show
+    }
+
+    fun getShowHidden(): Boolean = prefs.getBoolean(KEY_SHOW_HIDDEN, false)
 }
