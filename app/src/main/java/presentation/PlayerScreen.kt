@@ -105,6 +105,10 @@ fun PlayerScreen(
     val watchPositions by viewModel.watchPositions.collectAsState()
     val context = LocalContext.current
 
+    // Hoist scroll position to survive gallery/player toggle
+    val scrollIndex = remember { mutableIntStateOf(0) }
+    val scrollOffset = remember { mutableIntStateOf(0) }
+
     BackHandler(enabled = true) {
         if (!isGalleryMode) {
             viewModel.setGalleryMode(true)
@@ -179,7 +183,10 @@ fun PlayerScreen(
                     onBackToHome = onBackToHome,
                     onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) },
                     onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
-                    onDeleteItem = { uri -> viewModel.removeFromList(uri) }
+                    onDeleteItem = { uri -> viewModel.removeFromList(uri) },
+                    initialScrollIndex = scrollIndex.intValue,
+                    initialScrollOffset = scrollOffset.intValue,
+                    onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }
                 )
             }
         } else {

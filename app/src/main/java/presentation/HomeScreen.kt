@@ -5,6 +5,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -523,6 +524,7 @@ private fun AllPhotosContent(
                         DeviceFolderCard(
                             folder = folder,
                             customCoverUri = customCover,
+                            isSelected = isSel,
                             onClick = {
                                 if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
                                 else onFolderClick(folder)
@@ -750,6 +752,7 @@ private fun AllPhotosContent(
 private fun DeviceFolderCard(
     folder: MediaFolder,
     customCoverUri: Uri? = null,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongPress: () -> Unit = {}
 ) {
@@ -759,7 +762,8 @@ private fun DeviceFolderCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(0.85f),
+            .aspectRatio(0.85f)
+            .then(if (isSelected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)) else Modifier),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -822,6 +826,20 @@ private fun DeviceFolderCard(
                     color = Color.White.copy(0.6f),
                     fontSize = 12.sp
                 )
+            }
+
+            // Selection checkbox
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                }
             }
         }
     }
