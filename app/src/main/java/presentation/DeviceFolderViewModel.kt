@@ -80,20 +80,34 @@ class DeviceFolderViewModel @Inject constructor(
         if (!force && loadedBucketId == bucketId && _files.value.isNotEmpty()) return
         loadedBucketId = bucketId
 
-        // Show cached files synchronously - only use file:// URIs (not stale content:// URIs)
+        // Show cached files synchronously - only use file:// URIs
         if (!force) {
             val cached = folderFileCache.getFolderFiles(bucketId)
-            if (cached.isNotEmpty() && cached.first().scheme == "file") {
+            if (cached.isNotEmpty()) {
                 _files.value = cached
                 playbackList = cached
                 _isLoading.value = false
-                // Pre-warm cache for cached files
                 preWarmCache(cached.take(50))
-                // Still refresh in background
+                // Background refresh - silent, don't update _files unless count changed
+                viewModelScope.launch(Dispatchers.IO) {
+                    val folderPath = scanner.getFolderPath(bucketId) ?: return@launch
+                    val folderUri = android.net.Uri.fromFile(File(folderPath))
+                    val allFiles = mutableListOf<Uri>()
+                    createScanner().scanPlaylistItemsFlow(
+                        items = listOf(PlaylistItemEntity(playlistId = 0, uriString = folderUri.toString(), type = ItemType.FOLDER, isRecursive = false)),
+                        filter = MediaFilterType.MIXED
+                    ).collect { batch -> allFiles.addAll(batch) }
+                    if (allFiles.size != cached.size) {
+                        _files.value = allFiles
+                        playbackList = allFiles
+                        folderFileCache.saveFolderFiles(bucketId, allFiles)
+                    }
+                }
+                return
             }
         }
 
-        if (_files.value.isEmpty()) _isLoading.value = true
+        _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
             val folderPath = scanner.getFolderPath(bucketId)
             Log.w("DeviceFolderVM", "loadFolder bucketId=$bucketId folderPath=$folderPath")
