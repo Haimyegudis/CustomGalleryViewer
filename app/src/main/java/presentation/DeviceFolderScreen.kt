@@ -31,13 +31,6 @@ fun DeviceFolderScreen(
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val context = LocalContext.current
 
-    // Defer heavy rendering by 1 frame to let navigation animation complete
-    var readyToRender by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(50)
-        readyToRender = true
-    }
-
     // Hoist scroll position to survive gallery/player toggle
     val scrollIndex = remember { mutableIntStateOf(0) }
     val scrollOffset = remember { mutableIntStateOf(0) }
@@ -105,9 +98,7 @@ fun DeviceFolderScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (!readyToRender) {
-            // Show empty screen for 1 frame to let navigation complete fast
-        } else if (isGalleryMode) {
+        if (isGalleryMode) {
             GalleryGridView(
                 items = filteredFiles,
                 currentUri = currentMedia,
