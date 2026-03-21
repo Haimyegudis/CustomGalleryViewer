@@ -79,10 +79,12 @@ class DeviceFolderViewModel @Inject constructor(
     fun loadFolder(bucketId: Long, force: Boolean = false) {
         if (!force && loadedBucketId == bucketId && _files.value.isNotEmpty()) return
         loadedBucketId = bucketId
+        val startTime = System.currentTimeMillis()
 
         // Show cached files synchronously - only use file:// URIs
         if (!force) {
             val cached = folderFileCache.getFolderFiles(bucketId)
+            Log.w("DeviceFolderVM", "cache lookup took ${System.currentTimeMillis() - startTime}ms, cached=${cached.size}")
             if (cached.isNotEmpty()) {
                 _files.value = cached
                 playbackList = cached

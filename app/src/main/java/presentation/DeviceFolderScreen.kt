@@ -31,6 +31,13 @@ fun DeviceFolderScreen(
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val context = LocalContext.current
 
+    // Defer heavy rendering by 1 frame to let navigation animation complete
+    var readyToRender by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(50)
+        readyToRender = true
+    }
+
     // Hoist scroll position to survive gallery/player toggle
     val scrollIndex = remember { mutableIntStateOf(0) }
     val scrollOffset = remember { mutableIntStateOf(0) }
@@ -39,8 +46,9 @@ fun DeviceFolderScreen(
     var searchQuery by remember { mutableStateOf("") }
     var mediaFilter by remember { mutableStateOf(MediaFilterType.MIXED) }
 
-    // Filter files
-    val filteredFiles = remember(files, searchQuery, mediaFilter) {
+    // Filter files - use files directly for common case (no filter)
+    val filteredFiles = if (mediaFilter == MediaFilterType.MIXED && searchQuery.isEmpty()) files
+    else remember(files, searchQuery, mediaFilter) {
         var result = files
         if (mediaFilter != MediaFilterType.MIXED) {
             result = result.filter { uri ->
@@ -80,10 +88,14 @@ fun DeviceFolderScreen(
         }
     }
 
+    // Load folder immediately - don't wait for DisposableEffect
+    LaunchedEffect(bucketId) {
+        viewModel.loadFolder(bucketId)
+    }
+
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        viewModel.loadFolder(bucketId)
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             if (window != null) {
@@ -93,7 +105,9 @@ fun DeviceFolderScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (isGalleryMode) {
+        if (!readyToRender) {
+            // Show empty screen for 1 frame to let navigation complete fast
+        } else if (isGalleryMode) {
             GalleryGridView(
                 items = filteredFiles,
                 currentUri = currentMedia,
