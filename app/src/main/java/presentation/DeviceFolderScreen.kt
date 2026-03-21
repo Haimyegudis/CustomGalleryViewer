@@ -62,14 +62,21 @@ fun DeviceFolderScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        val window = (context as? Activity)?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (window != null) {
-            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+    // Toggle system bars based on gallery mode
+    LaunchedEffect(isGalleryMode) {
+        val window = (context as? Activity)?.window ?: return@LaunchedEffect
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        if (isGalleryMode) {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        } else {
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
         }
+    }
+
+    DisposableEffect(Unit) {
+        val window = (context as? Activity)?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         viewModel.loadFolder(bucketId)
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -95,12 +102,31 @@ fun DeviceFolderScreen(
                 onBackToHome = onBack
             )
         } else {
+            // Read persistent playback settings
+            val prefs = remember { context.getSharedPreferences("gallery_settings", android.content.Context.MODE_PRIVATE) }
+            var isShuffleOn by remember { mutableStateOf(prefs.getBoolean("shuffle_on", false)) }
+            var isRepeatListOn by remember { mutableStateOf(prefs.getBoolean("repeat_list_on", false)) }
+
             PlayerContentView(
                 currentMedia = currentMedia,
                 navigationMode = navigationMode,
+                isShuffleOn = isShuffleOn,
+                isRepeatListOn = isRepeatListOn,
                 onNext = { viewModel.onNext() },
                 onPrev = { viewModel.onPrevious() },
-                onToggleGallery = { viewModel.setGalleryMode(true) }
+                onToggleGallery = { viewModel.setGalleryMode(true) },
+                onToggleShuffle = {
+                    isShuffleOn = !isShuffleOn
+                    prefs.edit().putBoolean("shuffle_on", isShuffleOn).apply()
+                },
+                onToggleRepeatList = {
+                    isRepeatListOn = !isRepeatListOn
+                    prefs.edit().putBoolean("repeat_list_on", isRepeatListOn).apply()
+                },
+                onSaveWatchPosition = { uri, pos, dur -> viewModel.saveWatchPosition(uri, pos, dur) },
+                getWatchPosition = { uri -> viewModel.getWatchPosition(uri) },
+                onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
+                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) }
             )
         }
     }

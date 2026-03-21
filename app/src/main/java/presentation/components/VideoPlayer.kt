@@ -73,10 +73,16 @@ fun VideoPlayer(
     isShuffleOn: Boolean = false,
     isRepeatListOn: Boolean = false,
     navigationMode: String = "TAP",
+    initialPosition: Long = 0L,
+    onSavePosition: (Uri, Long, Long) -> Unit = { _, _, _ -> },
+    onToggleFavorite: (Uri) -> Unit = {},
+    isFavorite: Boolean = false,
+    onDelete: (Uri) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("gallery_settings", android.content.Context.MODE_PRIVATE) }
 
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(false) }
@@ -85,8 +91,9 @@ fun VideoPlayer(
 
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
-    var isLooping by remember { mutableStateOf(false) }
+    var isLooping by remember { mutableStateOf(prefs.getBoolean("loop_one", false)) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
+    var manualNavTime by remember { mutableLongStateOf(0L) }
 
     var mediaGeneration by remember { mutableIntStateOf(0) }
     var endHandledForGeneration by remember { mutableIntStateOf(-1) }
@@ -111,7 +118,7 @@ fun VideoPlayer(
 
     var screenHeight by remember { mutableFloatStateOf(0f) }
     var isMirrored by remember { mutableStateOf(false) }
-    var isMuted by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(prefs.getBoolean("is_muted", false)) }
 
     val speedOptions = listOf(0.25f, 0.5f, 1f, 1.5f, 2f, 4f)
 
@@ -160,9 +167,10 @@ fun VideoPlayer(
         }
         Log.w("VideoPlayer", "MediaItem MIME: ${mediaItem.localConfiguration?.mimeType ?: "auto"}")
         exoPlayer.setMediaItem(mediaItem)
-        exoPlayer.seekTo(0)
+        exoPlayer.seekTo(if (initialPosition > 0) initialPosition else 0)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
+        exoPlayer.volume = if (isMuted) 0f else 1f
     }
 
     LaunchedEffect(isLooping) {
@@ -191,19 +199,39 @@ fun VideoPlayer(
                     !isLooping &&
                     endHandledForGeneration != mediaGeneration &&
                     duration > 0 &&
-                    currentPosition > 0
+                    currentPosition > 0 &&
+                    System.currentTimeMillis() - manualNavTime > 500
                 ) {
                     endHandledForGeneration = mediaGeneration
                     delay(300)
-                    onNext()
+                    if (System.currentTimeMillis() - manualNavTime > 500) {
+                        onNext()
+                    }
                 }
             }
             delay(100)
         }
     }
 
+    // Save watch position every 5 seconds
+    LaunchedEffect(uri) {
+        while (true) {
+            delay(5000)
+            val pos = exoPlayer.currentPosition
+            val dur = exoPlayer.duration.coerceAtLeast(0L)
+            if (pos > 0 && dur > 0) {
+                onSavePosition(uri, pos, dur)
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            val pos = exoPlayer.currentPosition
+            val dur = exoPlayer.duration.coerceAtLeast(0L)
+            if (pos > 0 && dur > 0) {
+                onSavePosition(uri, pos, dur)
+            }
             exoPlayer.stop()
             exoPlayer.release()
         }
@@ -220,14 +248,15 @@ fun VideoPlayer(
         // Video layer
         AndroidView(
             factory = { ctx ->
-                val textureView = TextureView(ctx).apply {
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     layoutParams = FrameLayout.LayoutParams(-1, -1)
                 }
-                exoPlayer.setVideoTextureView(textureView)
-                textureView
             },
-            update = { tv ->
-                tv.scaleX = if (isMirrored) -1f else 1f
+            update = { pv ->
+                pv.scaleX = if (isMirrored) -1f else 1f
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -295,8 +324,16 @@ fun VideoPlayer(
                                         }
                                         val width = size.width
                                         when {
-                                            downPos.x < width * 0.3 -> onPrev()
-                                            downPos.x > width * 0.7 -> onNext()
+                                            downPos.x < width * 0.3 -> {
+                                                manualNavTime = System.currentTimeMillis()
+                                                Log.d("VideoPlayer", "Double-tap prev")
+                                                onPrev()
+                                            }
+                                            downPos.x > width * 0.7 -> {
+                                                manualNavTime = System.currentTimeMillis()
+                                                Log.d("VideoPlayer", "Double-tap next")
+                                                onNext()
+                                            }
                                             else -> isControlsVisible = !isControlsVisible
                                         }
                                     } else {
@@ -421,13 +458,25 @@ fun VideoPlayer(
                                 icon = Icons.Default.RepeatOne,
                                 label = "Repeat",
                                 isActive = isLooping,
-                                onClick = { isLooping = !isLooping }
+                                onClick = {
+                                    isLooping = !isLooping
+                                    prefs.edit().putBoolean("loop_one", isLooping).apply()
+                                    // Mutually exclusive: turn off repeat list if loop one is on
+                                    if (isLooping && isRepeatListOn) onToggleRepeatList()
+                                }
                             )
                             ControlIconButton(
                                 icon = Icons.Default.Repeat,
                                 label = "Repeat List",
                                 isActive = isRepeatListOn,
-                                onClick = onToggleRepeatList
+                                onClick = {
+                                    onToggleRepeatList()
+                                    // Mutually exclusive: turn off loop one if repeat list is on
+                                    if (!isRepeatListOn && isLooping) {
+                                        isLooping = false
+                                        prefs.edit().putBoolean("loop_one", false).apply()
+                                    }
+                                }
                             )
                             ControlIconButton(
                                 icon = Icons.Default.Shuffle,
@@ -473,6 +522,7 @@ fun VideoPlayer(
                                 onClick = {
                                     isMuted = !isMuted
                                     exoPlayer.volume = if (isMuted) 0f else 1f
+                                    prefs.edit().putBoolean("is_muted", isMuted).apply()
                                 }
                             )
                             // Speed
@@ -767,7 +817,14 @@ fun VideoPlayer(
         }
 
         if (showActionMenu) {
-            ActionMenuDialog(uri = uri, isVideo = true, onDismiss = { showActionMenu = false })
+            ActionMenuDialog(
+                uri = uri,
+                isVideo = true,
+                onDismiss = { showActionMenu = false },
+                onToggleFavorite = onToggleFavorite,
+                isFavorite = isFavorite,
+                onDelete = onDelete
+            )
         }
     }
 }
@@ -800,9 +857,21 @@ fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-fun ActionMenuDialog(uri: Uri, isVideo: Boolean, onDismiss: () -> Unit) {
+fun ActionMenuDialog(
+    uri: Uri,
+    isVideo: Boolean,
+    onDismiss: () -> Unit,
+    onFileChanged: () -> Unit = {},
+    onToggleFavorite: (Uri) -> Unit = {},
+    isFavorite: Boolean = false,
+    onDelete: (Uri) -> Unit = {},
+    onRenameFile: (Uri, String) -> Unit = { _, _ -> }
+) {
     val context = LocalContext.current
     val mediaInfo = remember { getMediaInfo(context, uri) }
+    var folderPickerOp by remember { mutableStateOf<FileOperation?>(null) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Media Info", fontWeight = FontWeight.SemiBold) },
@@ -812,6 +881,15 @@ fun ActionMenuDialog(uri: Uri, isVideo: Boolean, onDismiss: () -> Unit) {
                 InfoRow("Size:", mediaInfo.size)
                 InfoRow("Date:", mediaInfo.date)
                 HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                TextButton(onClick = { onToggleFavorite(uri); onDismiss() }) {
+                    Icon(
+                        if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        null,
+                        tint = if (isFavorite) Color(0xFFFF4081) else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isFavorite) "Unfavorite" else "Favorite")
+                }
                 TextButton(onClick = { shareMedia(context, uri, isVideo); onDismiss() }) {
                     Icon(Icons.Default.Share, null)
                     Spacer(Modifier.width(8.dp))
@@ -822,11 +900,73 @@ fun ActionMenuDialog(uri: Uri, isVideo: Boolean, onDismiss: () -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     Text("Open With")
                 }
+                TextButton(onClick = { folderPickerOp = FileOperation.COPY }) {
+                    Icon(Icons.Default.FileCopy, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Copy to...")
+                }
+                TextButton(onClick = { folderPickerOp = FileOperation.MOVE }) {
+                    Icon(Icons.Default.DriveFileMove, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Move to...")
+                }
+                TextButton(onClick = { showRenameDialog = true }) {
+                    Icon(Icons.Default.Edit, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Rename")
+                }
+                TextButton(onClick = { onDelete(uri); onDismiss() }) {
+                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         shape = RoundedCornerShape(20.dp)
     )
+
+    if (folderPickerOp != null) {
+        FolderPickerDialog(
+            uri = uri,
+            operation = folderPickerOp!!,
+            onDismiss = { folderPickerOp = null },
+            onComplete = {
+                folderPickerOp = null
+                onFileChanged()
+                onDismiss()
+            }
+        )
+    }
+
+    if (showRenameDialog) {
+        var newName by remember { mutableStateOf(mediaInfo.name) }
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("File name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newName.isNotBlank()) {
+                        onRenameFile(uri, newName.trim())
+                    }
+                    showRenameDialog = false
+                    onDismiss()
+                }) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 }
 
 data class MediaInfo(val name: String, val size: String, val path: String, val date: String, val duration: String)
@@ -899,18 +1039,35 @@ fun setAppBrightness(context: Context, percent: Float) {
     act.window.attributes = lp
 }
 
+private fun toContentUri(context: Context, uri: Uri): Uri {
+    if (uri.scheme == "file" && uri.path != null) {
+        return try {
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                File(uri.path!!)
+            )
+        } catch (e: Exception) {
+            uri
+        }
+    }
+    return uri
+}
+
 fun shareMedia(context: Context, uri: Uri, isVideo: Boolean) {
+    val contentUri = toContentUri(context, uri)
     val i = Intent(Intent.ACTION_SEND).apply {
         type = if (isVideo) "video/*" else "image/*"
-        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_STREAM, contentUri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(i, "Share"))
 }
 
 fun openWith(context: Context, uri: Uri, isVideo: Boolean) {
+    val contentUri = toContentUri(context, uri)
     val i = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, if (isVideo) "video/*" else "image/*")
+        setDataAndType(contentUri, if (isVideo) "video/*" else "image/*")
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(i, "Open"))

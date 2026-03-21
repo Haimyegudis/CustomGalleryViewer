@@ -77,4 +77,15 @@ class SettingsViewModel @Inject constructor(
         settingsManager.setShowHidden(show)
         _showHidden.value = show
     }
+
+    fun getLocalSort(): String = settingsManager.getLocalSort()
+    fun setLocalSort(sort: String) = settingsManager.setLocalSort(sort)
+    fun getHomeViewMode(): String = settingsManager.getHomeViewMode()
+    fun setHomeViewMode(mode: String) = settingsManager.setHomeViewMode(mode)
+    fun getFilesViewMode(): String = settingsManager.getFilesViewMode()
+    fun setFilesViewMode(mode: String) = settingsManager.setFilesViewMode(mode)
+    fun getFolderGridColumns(): Int = settingsManager.getFolderGridColumns()
+    fun setFolderGridColumns(cols: Int) = settingsManager.setFolderGridColumns(cols)
+    fun getMediaFilter(): String = settingsManager.getMediaFilter()
+    fun setMediaFilter(filter: String) = settingsManager.setMediaFilter(filter)
 }

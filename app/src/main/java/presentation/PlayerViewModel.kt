@@ -26,6 +26,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
+import com.example.customgalleryviewer.data.FavoriteDao
+import com.example.customgalleryviewer.data.FavoriteEntity
+import com.example.customgalleryviewer.data.FolderFileCache
+import com.example.customgalleryviewer.data.WatchPositionDao
+import com.example.customgalleryviewer.data.WatchPositionEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 
 @HiltViewModel
@@ -33,6 +38,9 @@ class PlayerViewModel @Inject constructor(
     private val repository: MediaRepository,
     private val settingsManager: SettingsManager,
     private val cacheManager: MediaCacheManager,
+    private val folderFileCache: FolderFileCache,
+    private val watchPositionDao: WatchPositionDao,
+    private val favoriteDao: FavoriteDao,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
@@ -58,10 +66,10 @@ class PlayerViewModel @Inject constructor(
     val isBrowseMode: StateFlow<Boolean> = _isBrowseMode.asStateFlow()
 
     private var _playbackItems: List<Uri> = emptyList()
-    private val originalRawSet = LinkedHashSet<Uri>()
+    private val originalRawSet = java.util.Collections.synchronizedSet(LinkedHashSet<Uri>())
 
     // History navigation
-    private val history = mutableListOf<Int>()
+    private val history = java.util.Collections.synchronizedList(mutableListOf<Int>())
     private var currentHistoryIndex = -1
 
     private var loadedPlaylistId: Long? = null
@@ -83,10 +91,10 @@ class PlayerViewModel @Inject constructor(
     private val _mediaFilter = MutableStateFlow(MediaFilterType.MIXED)
     val mediaFilter: StateFlow<MediaFilterType> = _mediaFilter.asStateFlow()
 
-    private val _isShuffleOn = MutableStateFlow(false)
+    private val _isShuffleOn = MutableStateFlow(settingsManager.getShuffleOn())
     val isShuffleOn: StateFlow<Boolean> = _isShuffleOn.asStateFlow()
 
-    private val _isRepeatListOn = MutableStateFlow(false)
+    private val _isRepeatListOn = MutableStateFlow(settingsManager.getRepeatListOn())
     val isRepeatListOn: StateFlow<Boolean> = _isRepeatListOn.asStateFlow()
 
     init {
@@ -128,14 +136,32 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
+        // Show cached files instantly before launching coroutine
+        val cached = folderFileCache.getPlaylistFiles(playlistId)
+        if (cached.isNotEmpty()) {
+            originalRawSet.addAll(cached)
+            viewModelScope.launch {
+                updateGalleryList(settingsManager.getGallerySort())
+                updatePlaybackList(settingsManager.getPlaybackSort())
+                if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
+                    history.add(0)
+                    currentHistoryIndex = 0
+                    _currentMedia.value = _playbackItems[0]
+                }
+                _isLoading.value = false
+            }
+        }
+
         viewModelScope.launch {
-            _isLoading.value = true
+            if (cached.isEmpty()) _isLoading.value = true
             loadedPlaylistId = playlistId
             currentGallerySort = null
             currentPlaybackSort = null
-            originalRawSet.clear()
-            history.clear()
-            currentHistoryIndex = -1
+            if (cached.isEmpty()) {
+                originalRawSet.clear()
+                history.clear()
+                currentHistoryIndex = -1
+            }
 
             Log.d("PlayerViewModel", "Starting to load playlist $playlistId")
 
@@ -180,6 +206,9 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
+            // Save to cache after scan completes
+            folderFileCache.savePlaylistFiles(playlistId, originalRawSet.toList())
+
             _isLoading.value = false
             Log.d("PlayerViewModel", "Finished loading playlist. Total: ${originalRawSet.size} files")
         }
@@ -220,7 +249,7 @@ class PlayerViewModel @Inject constructor(
 
     private suspend fun sortList(list: List<Uri>, order: SortOrder): List<Uri> = withContext(Dispatchers.Default) {
         when (order) {
-            SortOrder.RANDOM -> list.shuffled()
+            SortOrder.RANDOM -> list
             SortOrder.BY_NAME -> list.sortedBy { it.lastPathSegment?.lowercase() ?: "" }
             SortOrder.BY_DATE -> list.sortedByDescending {
                 try { File(it.path ?: "").lastModified() } catch (e: Exception) { 0L }
@@ -243,17 +272,19 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun getVideoDuration(uri: Uri): Long {
+        val retriever = MediaMetadataRetriever()
         return try {
-            val retriever = MediaMetadataRetriever()
             if (uri.scheme == "file") {
                 retriever.setDataSource(uri.path)
             } else {
                 retriever.setDataSource(appContext, uri)
             }
             val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            retriever.release()
             durationStr?.toLongOrNull() ?: 0L
         } catch (e: Exception) { 0L }
+        finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
     }
 
     private fun filterGalleryItems(query: String, filter: MediaFilterType) {
@@ -296,7 +327,7 @@ class PlayerViewModel @Inject constructor(
         val isRandom = _isShuffleOn.value || settingsManager.getPlaybackSort() == SortOrder.RANDOM
 
         if (currentHistoryIndex < history.lastIndex) {
-            // Moving forward in history
+            // Moving forward in history - don't trim forward history
             currentHistoryIndex++
             updateMediaFromHistory()
         } else {
@@ -309,7 +340,13 @@ class PlayerViewModel @Inject constructor(
             }
 
             history.add(nextIndex)
-            currentHistoryIndex = history.lastIndex
+            // Cap history at 500
+            if (history.size > 500) {
+                history.removeAt(0)
+            } else {
+                currentHistoryIndex = history.lastIndex
+            }
+            if (currentHistoryIndex >= history.size) currentHistoryIndex = history.lastIndex
             updateMediaFromHistory()
         }
     }
@@ -335,6 +372,10 @@ class PlayerViewModel @Inject constructor(
             }
 
             history.add(0, prevIndex)
+            // Cap history at 500 - remove from end
+            if (history.size > 500) {
+                history.removeAt(history.lastIndex)
+            }
             currentHistoryIndex = 0
             updateMediaFromHistory()
         }
@@ -371,8 +412,9 @@ class PlayerViewModel @Inject constructor(
     fun jumpToItem(uri: Uri) {
         val indexInPlayback = _playbackItems.indexOf(uri)
         if (indexInPlayback != -1) {
+            history.clear()
             history.add(indexInPlayback)
-            currentHistoryIndex = history.lastIndex
+            currentHistoryIndex = 0
             _currentMedia.value = uri
             _isGalleryMode.value = false
         }
@@ -393,6 +435,7 @@ class PlayerViewModel @Inject constructor(
 
     fun toggleShuffle() {
         _isShuffleOn.value = !_isShuffleOn.value
+        settingsManager.setShuffleOn(_isShuffleOn.value)
         if (_isShuffleOn.value) {
             viewModelScope.launch {
                 updatePlaybackList(SortOrder.RANDOM)
@@ -406,6 +449,59 @@ class PlayerViewModel @Inject constructor(
 
     fun toggleRepeatList() {
         _isRepeatListOn.value = !_isRepeatListOn.value
+        settingsManager.setRepeatListOn(_isRepeatListOn.value)
+    }
+
+    fun removeFromList(uri: Uri) {
+        originalRawSet.remove(uri)
+        viewModelScope.launch {
+            updateGalleryList(settingsManager.getGallerySort())
+            updatePlaybackList(settingsManager.getPlaybackSort())
+        }
+    }
+
+    // --- Watch position ---
+
+    fun saveWatchPosition(uri: Uri, position: Long, duration: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            watchPositionDao.savePosition(
+                WatchPositionEntity(uri = uri.toString(), position = position, duration = duration)
+            )
+        }
+    }
+
+    suspend fun getWatchPosition(uri: Uri): Long {
+        return withContext(Dispatchers.IO) {
+            watchPositionDao.getPosition(uri.toString())?.position ?: 0L
+        }
+    }
+
+    // --- Favorites ---
+
+    private val _favoriteUris = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteUris: StateFlow<Set<String>> = _favoriteUris.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            favoriteDao.getAllFavoriteUrisFlow().collectLatest { uris ->
+                _favoriteUris.value = uris.toSet()
+            }
+        }
+    }
+
+    fun toggleFavorite(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val uriStr = uri.toString()
+            if (favoriteDao.isFavorite(uriStr)) {
+                favoriteDao.removeFavorite(uriStr)
+            } else {
+                favoriteDao.addFavorite(FavoriteEntity(uri = uriStr))
+            }
+        }
+    }
+
+    fun isFavorite(uri: Uri): Boolean {
+        return _favoriteUris.value.contains(uri.toString())
     }
 
     // --- Folder browsing ---

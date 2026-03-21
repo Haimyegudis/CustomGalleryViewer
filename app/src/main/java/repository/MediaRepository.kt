@@ -25,6 +25,10 @@ class MediaRepository @Inject constructor(
 
     fun getPlaylistsFlow(): Flow<List<PlaylistWithItems>> = playlistDao.getPlaylistsFlow()
 
+    suspend fun getAllPlaylistsOnce(): List<com.example.customgalleryviewer.data.PlaylistEntity> {
+        return playlistDao.getAllPlaylists().map { it.playlist }
+    }
+
     fun getMediaFilesFlow(playlistId: Long): Flow<List<Uri>> = kotlinx.coroutines.flow.flow {
         val playlistWithItems = playlistDao.getPlaylistWithItems(playlistId)
 

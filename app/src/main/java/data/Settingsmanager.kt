@@ -22,6 +22,16 @@ class SettingsManager @Inject constructor(
         private const val KEY_NAV_MODE = "navigation_mode"
         private const val KEY_GRID_COLUMNS = "grid_columns"
         private const val KEY_SHOW_HIDDEN = "show_hidden_files"
+        private const val KEY_HOME_VIEW_MODE = "home_view_mode"
+        private const val KEY_FILES_VIEW_MODE = "files_view_mode"
+        private const val KEY_SHUFFLE_ON = "shuffle_on"
+        private const val KEY_REPEAT_LIST_ON = "repeat_list_on"
+        private const val KEY_MEDIA_FILTER = "media_filter"
+        private const val KEY_FOLDER_GRID_COLUMNS = "folder_grid_columns"
+        private const val KEY_LOCAL_SORT = "local_sort_order"
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_SLIDESHOW_INTERVAL = "slideshow_interval"
+        private const val KEY_LOOP_ONE = "loop_one"
     }
 
     // --- Playback Sort (Random / Name / Date) ---
@@ -84,4 +94,25 @@ class SettingsManager @Inject constructor(
     }
 
     fun getShowHidden(): Boolean = prefs.getBoolean(KEY_SHOW_HIDDEN, false)
+
+    fun setLocalSort(sort: String) { prefs.edit().putString(KEY_LOCAL_SORT, sort).apply() }
+    fun getLocalSort(): String = prefs.getString(KEY_LOCAL_SORT, "default") ?: "default"
+
+    fun setHomeViewMode(mode: String) { prefs.edit().putString(KEY_HOME_VIEW_MODE, mode).apply() }
+    fun getHomeViewMode(): String = prefs.getString(KEY_HOME_VIEW_MODE, "hero") ?: "hero"
+    fun setFilesViewMode(mode: String) { prefs.edit().putString(KEY_FILES_VIEW_MODE, mode).apply() }
+    fun getFilesViewMode(): String = prefs.getString(KEY_FILES_VIEW_MODE, "grid") ?: "grid"
+
+    fun setShuffleOn(on: Boolean) { prefs.edit().putBoolean(KEY_SHUFFLE_ON, on).apply() }
+    fun getShuffleOn(): Boolean = prefs.getBoolean(KEY_SHUFFLE_ON, false)
+    fun setRepeatListOn(on: Boolean) { prefs.edit().putBoolean(KEY_REPEAT_LIST_ON, on).apply() }
+    fun getRepeatListOn(): Boolean = prefs.getBoolean(KEY_REPEAT_LIST_ON, false)
+
+    fun setMediaFilter(filter: String) { prefs.edit().putString(KEY_MEDIA_FILTER, filter).apply() }
+    fun getMediaFilter(): String = prefs.getString(KEY_MEDIA_FILTER, "MIXED") ?: "MIXED"
+    fun setFolderGridColumns(cols: Int) { prefs.edit().putInt(KEY_FOLDER_GRID_COLUMNS, cols).apply() }
+    fun getFolderGridColumns(): Int = prefs.getInt(KEY_FOLDER_GRID_COLUMNS, 3)
+
+    fun setLoopOne(on: Boolean) { prefs.edit().putBoolean(KEY_LOOP_ONE, on).apply() }
+    fun getLoopOne(): Boolean = prefs.getBoolean(KEY_LOOP_ONE, false)
 }

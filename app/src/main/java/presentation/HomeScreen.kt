@@ -1,6 +1,9 @@
 package com.example.customgalleryviewer.presentation
 
+import android.app.Activity
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -55,6 +58,28 @@ fun HomeScreen(
     val isScanning by viewModel.isScanning.collectAsState()
     val showHidden by viewModel.showHidden.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
+    val context = LocalContext.current
+
+    // Double-back-to-exit
+    var backPressedOnce by remember { mutableStateOf(false) }
+    BackHandler {
+        if (backPressedOnce) {
+            (context as? Activity)?.finish()
+        } else {
+            backPressedOnce = true
+            Toast.makeText(context, "Press back again to exit", Toast.LENGTH_SHORT).show()
+        }
+    }
+    LaunchedEffect(backPressedOnce) {
+        if (backPressedOnce) {
+            kotlinx.coroutines.delay(2000)
+            backPressedOnce = false
+        }
+    }
+
+    // View mode persistence
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    var homeViewMode by remember { mutableStateOf(settingsViewModel.getHomeViewMode()) }
 
     LaunchedEffect(selectedTab) {
         if (selectedTab == 1) viewModel.loadDeviceFolders()
@@ -99,21 +124,51 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    IconButton(
-                        onClick = onNavigateToSettings,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceVariant,
-                                CircleShape
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // View mode toggle
+                        IconButton(
+                            onClick = {
+                                homeViewMode = when (homeViewMode) {
+                                    "hero" -> "list"
+                                    "list" -> "grid"
+                                    else -> "hero"
+                                }
+                                settingsViewModel.setHomeViewMode(homeViewMode)
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(
+                                when (homeViewMode) {
+                                    "hero" -> Icons.Default.ViewAgenda
+                                    "list" -> Icons.Default.ViewList
+                                    else -> Icons.Default.GridView
+                                },
+                                "View Mode",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
-                    ) {
-                        Icon(
-                            Icons.Default.Settings,
-                            "Settings",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        }
+                        IconButton(
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                "Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
@@ -163,6 +218,7 @@ fun HomeScreen(
                 // My Lists tab
                 MyListsContent(
                     playlists = if (showHidden) playlists else playlists.filter { !it.playlist.isHidden },
+                    viewMode = homeViewMode,
                     onNavigateToPlayer = onNavigateToPlayer,
                     onDelete = { viewModel.deletePlaylist(it) },
                     onEdit = onNavigateToEdit,
@@ -189,6 +245,7 @@ fun HomeScreen(
 @Composable
 private fun MyListsContent(
     playlists: List<PlaylistWithItems>,
+    viewMode: String = "hero",
     onNavigateToPlayer: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     onEdit: (Long) -> Unit,
@@ -197,6 +254,37 @@ private fun MyListsContent(
     onRename: (Long, String) -> Unit,
     onNavigateToAdd: () -> Unit
 ) {
+    // Multi-select state
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+
+    if (isSelectionMode) {
+        // Selection header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { isSelectionMode = false; selectedIds = emptySet() }) {
+                Text("Cancel")
+            }
+            Text("${selectedIds.size} selected", fontWeight = FontWeight.SemiBold)
+            TextButton(
+                onClick = {
+                    selectedIds.forEach { onDelete(it) }
+                    selectedIds = emptySet()
+                    isSelectionMode = false
+                },
+                enabled = selectedIds.isNotEmpty()
+            ) {
+                Text("Delete", color = if (selectedIds.isNotEmpty()) MaterialTheme.colorScheme.error else Color.Gray)
+            }
+        }
+    }
+
     if (playlists.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -235,19 +323,80 @@ private fun MyListsContent(
             }
         }
     } else {
-        LazyColumn(
-            contentPadding = PaddingValues(bottom = 100.dp)
-        ) {
-            items(playlists) { playlistWithItems ->
-                PlaylistHeroCard(
-                    item = playlistWithItems,
-                    onClick = { onNavigateToPlayer(playlistWithItems.playlist.id) },
-                    onDelete = { onDelete(playlistWithItems.playlist.id) },
-                    onEdit = { onEdit(playlistWithItems.playlist.id) },
-                    onHide = { onHide(playlistWithItems.playlist.id) },
-                    onUnhide = { onUnhide(playlistWithItems.playlist.id) },
-                    onRename = { name -> onRename(playlistWithItems.playlist.id, name) }
-                )
+        when (viewMode) {
+            "grid" -> {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(playlists) { playlistWithItems ->
+                        val isSelected = selectedIds.contains(playlistWithItems.playlist.id)
+                        PlaylistGridCard(
+                            item = playlistWithItems,
+                            isSelected = isSelected,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    selectedIds = if (isSelected) selectedIds - playlistWithItems.playlist.id
+                                    else selectedIds + playlistWithItems.playlist.id
+                                } else {
+                                    onNavigateToPlayer(playlistWithItems.playlist.id)
+                                }
+                            },
+                            onLongClick = {
+                                isSelectionMode = true
+                                selectedIds = selectedIds + playlistWithItems.playlist.id
+                            }
+                        )
+                    }
+                }
+            }
+            "list" -> {
+                LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
+                    items(playlists) { playlistWithItems ->
+                        val isSelected = selectedIds.contains(playlistWithItems.playlist.id)
+                        PlaylistListRow(
+                            item = playlistWithItems,
+                            isSelected = isSelected,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    selectedIds = if (isSelected) selectedIds - playlistWithItems.playlist.id
+                                    else selectedIds + playlistWithItems.playlist.id
+                                } else {
+                                    onNavigateToPlayer(playlistWithItems.playlist.id)
+                                }
+                            },
+                            onLongClick = {
+                                isSelectionMode = true
+                                selectedIds = selectedIds + playlistWithItems.playlist.id
+                            }
+                        )
+                    }
+                }
+            }
+            else -> { // "hero"
+                LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
+                    items(playlists) { playlistWithItems ->
+                        PlaylistHeroCard(
+                            item = playlistWithItems,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    val id = playlistWithItems.playlist.id
+                                    selectedIds = if (selectedIds.contains(id)) selectedIds - id else selectedIds + id
+                                } else {
+                                    onNavigateToPlayer(playlistWithItems.playlist.id)
+                                }
+                            },
+                            onDelete = { onDelete(playlistWithItems.playlist.id) },
+                            onEdit = { onEdit(playlistWithItems.playlist.id) },
+                            onHide = { onHide(playlistWithItems.playlist.id) },
+                            onUnhide = { onUnhide(playlistWithItems.playlist.id) },
+                            onRename = { name -> onRename(playlistWithItems.playlist.id, name) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -727,5 +876,176 @@ fun PlaylistHeroCard(
             },
             shape = RoundedCornerShape(20.dp)
         )
+    }
+}
+
+@Composable
+private fun PlaylistGridCard(
+    item: PlaylistWithItems,
+    isSelected: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.85f)
+            .then(
+                if (isSelected) Modifier.background(
+                    MaterialTheme.colorScheme.primary.copy(0.2f),
+                    RoundedCornerShape(16.dp)
+                ) else Modifier
+            ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = { onLongClick() }
+                    )
+                }
+        ) {
+            if (item.playlist.thumbnailUri != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(Uri.parse(item.playlist.thumbnailUri))
+                        .decoderFactory(VideoFrameDecoder.Factory())
+                        .crossfade(true)
+                        .size(400)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Transparent, Color.Black.copy(0.8f))
+                        )
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    item.playlist.name,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${item.items.size} items",
+                    color = Color.White.copy(0.6f),
+                    fontSize = 12.sp
+                )
+            }
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistListRow(
+    item: PlaylistWithItems,
+    isSelected: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() }
+                )
+            },
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                if (item.playlist.thumbnailUri != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(Uri.parse(item.playlist.thumbnailUri))
+                            .decoderFactory(VideoFrameDecoder.Factory())
+                            .crossfade(true)
+                            .size(200)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.PhotoLibrary, null,
+                            tint = MaterialTheme.colorScheme.onSurface.copy(0.3f)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.playlist.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${item.items.size} items",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (isSelected) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
     }
 }

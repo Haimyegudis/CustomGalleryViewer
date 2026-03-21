@@ -181,6 +181,47 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
         }
     }
 
+    fun getFolderPath(bucketId: Long): String? {
+        val syntheticPath = syntheticFolderPaths[bucketId]
+        if (syntheticPath != null) return syntheticPath
+
+        // Query MediaStore for the folder path
+        try {
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media.DATA),
+                "${MediaStore.Images.Media.BUCKET_ID}=?",
+                arrayOf(bucketId.toString()),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dataIdx = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+                    if (dataIdx >= 0) {
+                        val path = cursor.getString(dataIdx)
+                        if (!path.isNullOrBlank()) return path.substringBeforeLast('/')
+                    }
+                }
+            }
+            // Try videos
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media.DATA),
+                "${MediaStore.Video.Media.BUCKET_ID}=?",
+                arrayOf(bucketId.toString()),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dataIdx = cursor.getColumnIndex(MediaStore.Video.Media.DATA)
+                    if (dataIdx >= 0) {
+                        val path = cursor.getString(dataIdx)
+                        if (!path.isNullOrBlank()) return path.substringBeforeLast('/')
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
     fun getFilesInFolder(bucketId: Long): List<Uri> {
         // Check if this is a filesystem-scanned folder (not in MediaStore)
         val syntheticPath = syntheticFolderPaths[bucketId]

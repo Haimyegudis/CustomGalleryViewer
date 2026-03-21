@@ -11,20 +11,30 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.content.Intent
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items as lazyListItems
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.core.content.FileProvider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -60,8 +70,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import com.example.customgalleryviewer.presentation.components.FileOperation
+import com.example.customgalleryviewer.presentation.components.FolderPickerDialog
+import com.example.customgalleryviewer.presentation.components.MultiFolderPickerDialog
 
 @Composable
 fun PlayerScreen(
@@ -84,6 +101,7 @@ fun PlayerScreen(
     val browseItems by viewModel.browseItems.collectAsState()
     val folderStack by viewModel.folderStack.collectAsState()
     val playlistFolders by viewModel.playlistFolders.collectAsState()
+    val favoriteUris by viewModel.favoriteUris.collectAsState()
     val context = LocalContext.current
 
     BackHandler(enabled = true) {
@@ -113,6 +131,18 @@ fun PlayerScreen(
         }
     }
 
+    // Toggle system bars based on gallery mode
+    LaunchedEffect(isGalleryMode) {
+        val window = (context as? Activity)?.window ?: return@LaunchedEffect
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        if (isGalleryMode) {
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isGalleryMode) {
             if (isBrowseMode) {
@@ -139,12 +169,15 @@ fun PlayerScreen(
                     isLoading = isLoading,
                     mediaFilter = mediaFilter,
                     playlistFolders = playlistFolders,
+                    favoriteUris = favoriteUris,
                     onItemClick = { uri -> viewModel.jumpToItem(uri) },
                     onColumnsChange = { viewModel.setGridColumns(it) },
                     onSearchQueryChange = { viewModel.setSearchQuery(it) },
                     onMediaFilterChange = { viewModel.setMediaFilter(it) },
                     onBackToHome = onBackToHome,
-                    onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) }
+                    onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) },
+                    onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
+                    onDeleteItem = { uri -> viewModel.removeFromList(uri) }
                 )
             }
         } else {
@@ -157,13 +190,17 @@ fun PlayerScreen(
                 onPrev = { viewModel.onPrevious() },
                 onToggleGallery = { viewModel.toggleGalleryMode() },
                 onToggleShuffle = { viewModel.toggleShuffle() },
-                onToggleRepeatList = { viewModel.toggleRepeatList() }
+                onToggleRepeatList = { viewModel.toggleRepeatList() },
+                onSaveWatchPosition = { uri, pos, dur -> viewModel.saveWatchPosition(uri, pos, dur) },
+                getWatchPosition = { uri -> viewModel.getWatchPosition(uri) },
+                onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
+                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) }
             )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun GalleryGridView(
     items: List<Uri>,
@@ -173,19 +210,39 @@ fun GalleryGridView(
     isLoading: Boolean,
     mediaFilter: MediaFilterType,
     playlistFolders: List<Pair<Uri, String>> = emptyList(),
+    favoriteUris: Set<String> = emptySet(),
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onMediaFilterChange: (MediaFilterType) -> Unit,
     onBackToHome: () -> Unit,
-    onBrowseFolder: (Uri, String) -> Unit = { _, _ -> }
+    onBrowseFolder: (Uri, String) -> Unit = { _, _ -> },
+    onToggleFavorite: (Uri) -> Unit = {},
+    onDeleteItem: (Uri) -> Unit = {}
 ) {
     var showSearch by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var localSort by remember { mutableStateOf("default") }
     val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // View mode: "grid" or "list"
+    var viewMode by remember { mutableStateOf("grid") }
+
+    // Context menu state
+    var contextMenuUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Rename dialog state
+    var renameUri by remember { mutableStateOf<Uri?>(null) }
+    var renameText by remember { mutableStateOf("") }
+
+    // Multi-select state
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedItems by remember { mutableStateOf<Set<Uri>>(emptySet()) }
+    var showSelectionMoreMenu by remember { mutableStateOf(false) }
 
     // Cache video durations asynchronously
     var durationCache by remember { mutableStateOf<Map<Uri, Long>>(emptyMap()) }
@@ -201,9 +258,9 @@ fun GalleryGridView(
         }
     }
 
-    // Local sort for this gallery view
-    val sortedItems = remember(items, localSort, durationCache) {
-        when (localSort) {
+    // Local sort for this gallery view, with favorites pinned to top
+    val sortedItems = remember(items, localSort, durationCache, favoriteUris) {
+        val sorted = when (localSort) {
             "name" -> items.sortedBy { it.lastPathSegment?.lowercase() ?: "" }
             "name_desc" -> items.sortedByDescending { it.lastPathSegment?.lowercase() ?: "" }
             "date" -> items.sortedByDescending {
@@ -215,9 +272,39 @@ fun GalleryGridView(
             "length" -> items.sortedByDescending { durationCache[it] ?: 0L }
             else -> items
         }
+        if (favoriteUris.isNotEmpty()) {
+            val (favs, rest) = sorted.partition { favoriteUris.contains(it.toString()) }
+            favs + rest
+        } else sorted
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        if (isSelectionMode) {
+            // Selection mode top bar
+            TopAppBar(
+                title = {
+                    Text("${selectedItems.size} selected", fontWeight = FontWeight.SemiBold)
+                },
+                navigationIcon = {
+                    TextButton(onClick = {
+                        isSelectionMode = false
+                        selectedItems = emptySet()
+                    }) {
+                        Text("Cancel", color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                actions = {
+                    TextButton(onClick = {
+                        selectedItems = sortedItems.toSet()
+                    }) {
+                        Text("Select All", color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        } else {
         // Clean top bar
         TopAppBar(
             title = {},
@@ -279,11 +366,20 @@ fun GalleryGridView(
                         else MaterialTheme.colorScheme.onSurface.copy(0.6f)
                     )
                 }
+                // View mode toggle
+                IconButton(onClick = { viewMode = if (viewMode == "grid") "list" else "grid" }) {
+                    Icon(
+                        if (viewMode == "grid") Icons.Default.ViewList else Icons.Default.GridView,
+                        "Toggle view",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(0.6f)
+                    )
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.background
             )
         )
+        } // end else (not selection mode)
 
         // Title + count
         Column(modifier = Modifier.padding(horizontal = 20.dp)) {
@@ -311,7 +407,7 @@ fun GalleryGridView(
             // Segmented control for filter
             SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                 val options = listOf(
-                    "All" to MediaFilterType.MIXED,
+                    "Mix" to MediaFilterType.MIXED,
                     "Photos" to MediaFilterType.PHOTOS_ONLY,
                     "Videos" to MediaFilterType.VIDEO_ONLY
                 )
@@ -473,7 +569,107 @@ fun GalleryGridView(
                 }
             }
 
-            // Apple Photos-style edge-to-edge grid
+            if (viewMode == "list") {
+                // List view
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    contentPadding = PaddingValues(2.dp)
+                ) {
+                    lazyListItems(sortedItems) { uri ->
+                        val isVideoItem = isVideo(uri.toString())
+                        val itemContext = LocalContext.current
+                        val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: ""
+                        val isFav = favoriteUris.contains(uri.toString())
+                        val isInSelection = selectedItems.contains(uri)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            selectedItems = if (isInSelection) selectedItems - uri else selectedItems + uri
+                                        } else {
+                                            onItemClick(uri)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!isSelectionMode) {
+                                            contextMenuUri = uri
+                                        }
+                                    }
+                                )
+                                .background(
+                                    if (isInSelection) MaterialTheme.colorScheme.primary.copy(0.1f)
+                                    else Color.Transparent
+                                )
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isSelectionMode) {
+                                Checkbox(
+                                    checked = isInSelection,
+                                    onCheckedChange = {
+                                        selectedItems = if (isInSelection) selectedItems - uri else selectedItems + uri
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            AsyncImage(
+                                model = ImageRequest.Builder(itemContext)
+                                    .data(uri)
+                                    .decoderFactory(VideoFrameDecoder.Factory())
+                                    .crossfade(true)
+                                    .size(128)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.Crop,
+                                error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    fileName,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (isVideoItem) {
+                                    val durationMs = durationCache[uri] ?: 0L
+                                    if (durationMs > 0) {
+                                        Text(
+                                            formatDuration(durationMs),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                            if (isFav) {
+                                Icon(
+                                    Icons.Default.Star, null,
+                                    tint = Color(0xFFFFD700),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            if (isVideoItem) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Default.PlayArrow, null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+            // Apple Photos-style edge-to-edge grid with scrollbar
+            Box(modifier = Modifier.fillMaxSize().weight(1f)) {
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(columns),
@@ -483,16 +679,31 @@ fun GalleryGridView(
                 verticalArrangement = Arrangement.spacedBy(1.5.dp)
             ) {
                 items(sortedItems) { uri ->
-                    val isSelected = uri == currentUri
+                    val isCurrent = uri == currentUri
                     val isVideoItem = isVideo(uri.toString())
                     val itemContext = LocalContext.current
                     val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: ""
+                    val isFav = favoriteUris.contains(uri.toString())
+                    val isInSelection = selectedItems.contains(uri)
 
                     Box(
                         modifier = Modifier
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(2.dp))
-                            .clickable { onItemClick(uri) }
+                            .combinedClickable(
+                                onClick = {
+                                    if (isSelectionMode) {
+                                        selectedItems = if (isInSelection) selectedItems - uri else selectedItems + uri
+                                    } else {
+                                        onItemClick(uri)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!isSelectionMode) {
+                                        contextMenuUri = uri
+                                    }
+                                }
+                            )
                     ) {
                         AsyncImage(
                             model = ImageRequest.Builder(itemContext)
@@ -560,8 +771,37 @@ fun GalleryGridView(
                             }
                         }
 
-                        // Selection highlight
-                        if (isSelected) {
+                        // Favorite star overlay
+                        if (isFav) {
+                            Icon(
+                                Icons.Default.Star, null,
+                                tint = Color(0xFFFFD700),
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(3.dp)
+                                    .size(14.dp)
+                            )
+                        }
+
+                        // Selection checkbox overlay
+                        if (isSelectionMode) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(2.dp)
+                            ) {
+                                Checkbox(
+                                    checked = isInSelection,
+                                    onCheckedChange = {
+                                        selectedItems = if (isInSelection) selectedItems - uri else selectedItems + uri
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Current highlight
+                        if (isCurrent) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -572,9 +812,235 @@ fun GalleryGridView(
                                     )
                             )
                         }
+
+                        // Selection highlight
+                        if (isInSelection) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.primary.copy(0.2f))
+                            )
+                        }
                     }
                 }
             }
+
+            // Fast scrollbar
+            FastScrollbar(
+                gridState = gridState,
+                itemCount = sortedItems.size,
+                columns = columns,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(12.dp)
+                    .padding(vertical = 8.dp)
+            )
+            } // end Box for grid + scrollbar
+            } // end else (grid mode)
+
+            // Selection mode bottom bar
+            if (isSelectionMode && selectedItems.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box {
+                            IconButton(onClick = { showSelectionMoreMenu = true }) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.MoreVert, "More")
+                                    Text("More", fontSize = 10.sp)
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = showSelectionMoreMenu,
+                                onDismissRequest = { showSelectionMoreMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Share") },
+                                    leadingIcon = { Icon(Icons.Default.Share, null) },
+                                    onClick = {
+                                        showSelectionMoreMenu = false
+                                        val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                                            type = "*/*"
+                                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(selectedItems.toList()))
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share"))
+                                    }
+                                )
+                            }
+                        }
+                        IconButton(onClick = {
+                            selectedItems.forEach { uri -> onDeleteItem(uri) }
+                            selectedItems = emptySet()
+                            isSelectionMode = false
+                        }) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Delete, "Delete", tint = Color(0xFFFF5252))
+                                Text("Delete", fontSize = 10.sp, color = Color(0xFFFF5252))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Context menu dialog
+        contextMenuUri?.let { menuUri ->
+            val menuFileName = menuUri.lastPathSegment?.substringAfterLast('/') ?: ""
+            val isFav = favoriteUris.contains(menuUri.toString())
+            AlertDialog(
+                onDismissRequest = { contextMenuUri = null },
+                title = {
+                    Text(menuFileName, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                },
+                text = {
+                    Column {
+                        // Select
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                isSelectionMode = true
+                                selectedItems = setOf(menuUri)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.CheckBox, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Select", modifier = Modifier.weight(1f))
+                        }
+                        // Favorite
+                        TextButton(
+                            onClick = {
+                                onToggleFavorite(menuUri)
+                                contextMenuUri = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
+                                null,
+                                tint = if (isFav) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (isFav) "Unfavorite" else "Favorite", modifier = Modifier.weight(1f))
+                        }
+                        // Rename
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                renameUri = menuUri
+                                renameText = menuFileName
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Rename", modifier = Modifier.weight(1f))
+                        }
+                        // Share
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "*/*"
+                                    putExtra(Intent.EXTRA_STREAM, menuUri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share"))
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Share, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Share", modifier = Modifier.weight(1f))
+                        }
+                        // Open With
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(menuUri, "*/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(openIntent, "Open with"))
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Open With", modifier = Modifier.weight(1f))
+                        }
+                        // Delete
+                        TextButton(
+                            onClick = {
+                                val uri = contextMenuUri
+                                contextMenuUri = null
+                                if (uri != null) onDeleteItem(uri)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Delete, null, tint = Color(0xFFFF5252), modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Delete", color = Color(0xFFFF5252), modifier = Modifier.weight(1f))
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { contextMenuUri = null }) {
+                        Text("Cancel")
+                    }
+                },
+                shape = RoundedCornerShape(20.dp)
+            )
+        }
+
+        // Rename dialog
+        renameUri?.let { rUri ->
+            AlertDialog(
+                onDismissRequest = { renameUri = null },
+                title = { Text("Rename") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val oldFile = rUri.path?.let { File(it) }
+                        if (oldFile != null && oldFile.exists()) {
+                            val newFile = File(oldFile.parent, renameText)
+                            val success = oldFile.renameTo(newFile)
+                            if (success) {
+                                Toast.makeText(context, "Renamed", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Rename failed", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        renameUri = null
+                    }) {
+                        Text("Rename")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renameUri = null }) {
+                        Text("Cancel")
+                    }
+                },
+                shape = RoundedCornerShape(20.dp)
+            )
         }
     }
 }
@@ -728,7 +1194,7 @@ fun FolderBrowseView(
         ) {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                 val options = listOf(
-                    "All" to MediaFilterType.MIXED,
+                    "Mix" to MediaFilterType.MIXED,
                     "Photos" to MediaFilterType.PHOTOS_ONLY,
                     "Videos" to MediaFilterType.VIDEO_ONLY
                 )
@@ -1086,7 +1552,11 @@ fun PlayerContentView(
     onPrev: () -> Unit,
     onToggleGallery: () -> Unit,
     onToggleShuffle: () -> Unit = {},
-    onToggleRepeatList: () -> Unit = {}
+    onToggleRepeatList: () -> Unit = {},
+    onSaveWatchPosition: (Uri, Long, Long) -> Unit = { _, _, _ -> },
+    getWatchPosition: suspend (Uri) -> Long = { 0L },
+    onToggleFavorite: (Uri) -> Unit = {},
+    isFavoriteCheck: (Uri) -> Boolean = { false }
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
     var scale by remember { mutableFloatStateOf(1f) }
@@ -1104,6 +1574,15 @@ fun PlayerContentView(
             val isVideoFile = isVideo(uri.toString())
 
             if (isVideoFile) {
+                var initialPosition by remember(uri) { mutableLongStateOf(-1L) }
+                LaunchedEffect(uri) {
+                    initialPosition = withContext(Dispatchers.IO) { getWatchPosition(uri) }
+                }
+                if (initialPosition < 0) {
+                    // Wait for position to load - show black screen briefly
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                } else {
+                val isFav = isFavoriteCheck(uri)
                 VideoPlayer(
                     uri = uri,
                     onNext = onNext,
@@ -1113,17 +1592,15 @@ fun PlayerContentView(
                     isShuffleOn = isShuffleOn,
                     isRepeatListOn = isRepeatListOn,
                     navigationMode = navigationMode,
+                    initialPosition = initialPosition,
+                    onSavePosition = onSaveWatchPosition,
+                    onToggleFavorite = onToggleFavorite,
+                    isFavorite = isFav,
                     modifier = Modifier.fillMaxSize()
                 )
+                } // end if initialPosition >= 0
             } else {
-                // Image viewer
-                var isDraggingBrightness by remember { mutableStateOf(false) }
-                var startBrightness by remember { mutableFloatStateOf(0f) }
-                var currentBrightnessLevel by remember { mutableFloatStateOf(0.5f) }
-                var showBrightnessIndicator by remember { mutableStateOf(false) }
-                var totalDragDistanceX by remember { mutableFloatStateOf(0f) }
-                var totalDragDistanceY by remember { mutableFloatStateOf(0f) }
-                var dragDecided by remember { mutableStateOf(false) }
+                // Image viewer - smooth pinch zoom + pan + swipe navigation
                 var swipeTriggered by remember { mutableStateOf(false) }
 
                 Box(
@@ -1131,121 +1608,52 @@ fun PlayerContentView(
                         .fillMaxSize()
                         .background(Color.Black)
                         .clipToBounds()
-                        .pointerInput(scale) {
+                        .pointerInput(Unit) {
                             detectTransformGestures { _, pan, zoom, _ ->
-                                if (scale > 1f || zoom != 1f) {
-                                    val newScale = (scale * zoom).coerceIn(1f, 4f)
-                                    scale = newScale
-                                    if (scale > 1f) {
-                                        val maxTranslateX = (size.width * (scale - 1)) / 2
-                                        val maxTranslateY = (size.height * (scale - 1)) / 2
-                                        offset = Offset(
-                                            x = (offset.x + pan.x * scale).coerceIn(-maxTranslateX, maxTranslateX),
-                                            y = (offset.y + pan.y * scale).coerceIn(-maxTranslateY, maxTranslateY)
-                                        )
-                                    } else {
-                                        offset = Offset.Zero
-                                    }
+                                val newScale = (scale * zoom).coerceIn(1f, 10f)
+                                scale = newScale
+                                if (scale > 1f) {
+                                    val maxTranslateX = (size.width * (scale - 1)) / 2
+                                    val maxTranslateY = (size.height * (scale - 1)) / 2
+                                    offset = Offset(
+                                        x = (offset.x + pan.x).coerceIn(-maxTranslateX, maxTranslateX),
+                                        y = (offset.y + pan.y).coerceIn(-maxTranslateY, maxTranslateY)
+                                    )
+                                } else {
+                                    offset = Offset.Zero
                                 }
                             }
                         }
-                        .pointerInput(scale) {
+                        .pointerInput(Unit) {
                             detectTapGestures(
                                 onDoubleTap = { tapOffset ->
-                                    val width = size.width
-                                    val height = size.height
-                                    val centerXStart = width * 0.3f
-                                    val centerXEnd = width * 0.7f
-                                    val centerYStart = height * 0.3f
-                                    val centerYEnd = height * 0.7f
-
-                                    val isInCenter = tapOffset.x in centerXStart..centerXEnd &&
-                                            tapOffset.y in centerYStart..centerYEnd
-
-                                    if (isInCenter) {
-                                        if (scale == 1f) {
-                                            scale = 2.5f
-                                        } else {
-                                            scale = 1f
-                                            offset = Offset.Zero
-                                        }
+                                    if (scale > 1f) {
+                                        scale = 1f
+                                        offset = Offset.Zero
+                                    } else {
+                                        scale = 3f
+                                        // Zoom toward tap point
+                                        val centerX = size.width / 2f
+                                        val centerY = size.height / 2f
+                                        offset = Offset(
+                                            x = (centerX - tapOffset.x) * 2f,
+                                            y = (centerY - tapOffset.y) * 2f
+                                        )
                                     }
                                 },
                                 onLongPress = { showActionMenu = true }
                             )
                         }
-                        .pointerInput(scale, navigationMode) {
-                            detectDragGestures(
-                                onDragStart = { dragOffset ->
-                                    totalDragDistanceX = 0f
-                                    totalDragDistanceY = 0f
-                                    dragDecided = false
-                                    swipeTriggered = false
-                                    isDraggingBrightness = false
-
-                                    if (scale == 1f) {
-                                        val activity = context as? Activity
-                                        if (activity != null) {
-                                            startBrightness = getCurrentBrightness(activity)
-                                            currentBrightnessLevel = startBrightness
-                                        }
-                                    }
-                                },
-                                onDragEnd = {
-                                    if (isDraggingBrightness) {
-                                        scope.launch {
-                                            delay(500)
-                                            showBrightnessIndicator = false
-                                            isDraggingBrightness = false
-                                        }
-                                    } else {
-                                        showBrightnessIndicator = false
-                                        isDraggingBrightness = false
-                                    }
-                                },
-                                onDragCancel = {
-                                    showBrightnessIndicator = false
-                                    isDraggingBrightness = false
-                                }
-                            ) { change, dragAmount ->
-                                totalDragDistanceX += dragAmount.x
-                                totalDragDistanceY += dragAmount.y
-
-                                if (scale == 1f) {
-                                    if (!dragDecided) {
-                                        val totalAbsX = abs(totalDragDistanceX)
-                                        val totalAbsY = abs(totalDragDistanceY)
-                                        if (totalAbsX > 30 || totalAbsY > 30) {
-                                            dragDecided = true
-                                            if (totalAbsX <= totalAbsY) {
-                                                val isRightSide = change.position.x > size.width / 2
-                                                if (isRightSide) {
-                                                    isDraggingBrightness = true
-                                                    showBrightnessIndicator = true
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (dragDecided) {
-                                        if (isDraggingBrightness) {
-                                            val sensitivity = 2000f
-                                            val deltaPercent = -totalDragDistanceY / sensitivity
-                                            val newBrightness = (startBrightness + deltaPercent).coerceIn(0f, 1f)
-                                            val activity = context as? Activity
-                                            if (activity != null) {
-                                                setAppBrightness(activity, newBrightness)
-                                                currentBrightnessLevel = newBrightness
-                                            }
-                                        } else if (navigationMode == "SWIPE" && !swipeTriggered) {
-                                            if (totalDragDistanceX < -120) {
-                                                swipeTriggered = true
-                                                onNext()
-                                            } else if (totalDragDistanceX > 120) {
-                                                swipeTriggered = true
-                                                onPrev()
-                                            }
-                                        }
+                        .pointerInput(navigationMode) {
+                            if (navigationMode == "SWIPE") {
+                                detectDragGestures(
+                                    onDragStart = { swipeTriggered = false },
+                                    onDragEnd = {},
+                                    onDragCancel = {}
+                                ) { _, dragAmount ->
+                                    if (scale == 1f && !swipeTriggered) {
+                                        if (dragAmount.x < -30) { swipeTriggered = true; onNext() }
+                                        else if (dragAmount.x > 30) { swipeTriggered = true; onPrev() }
                                     }
                                 }
                             }
@@ -1266,70 +1674,31 @@ fun PlayerContentView(
                     )
 
                     if (navigationMode == "TAP") {
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(0.3f)
-                                    .fillMaxHeight()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { onPrev() }
-                            )
-                            Spacer(modifier = Modifier.weight(0.4f))
-                            Box(
-                                modifier = Modifier
-                                    .weight(0.3f)
-                                    .fillMaxHeight()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { onNext() }
-                            )
-                        }
-                    }
-
-                    // Brightness indicator — frosted glass style
-                    AnimatedVisibility(
-                        visible = showBrightnessIndicator,
-                        enter = fadeIn(),
-                        exit = fadeOut(),
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 24.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color.Black.copy(0.6f)
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(14.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Brightness6, null,
-                                    tint = Color.Yellow,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                LinearProgressIndicator(
-                                    progress = { currentBrightnessLevel },
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                Box(
                                     modifier = Modifier
-                                        .height(100.dp)
-                                        .width(6.dp)
-                                        .clip(RoundedCornerShape(3.dp)),
-                                    color = Color.Yellow,
-                                    trackColor = Color.White.copy(0.15f)
+                                        .weight(0.3f)
+                                        .fillMaxHeight()
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onPrev() }
                                 )
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    "${(currentBrightnessLevel * 100).toInt()}%",
-                                    color = Color.White.copy(0.8f),
-                                    fontSize = 11.sp
+                                Spacer(modifier = Modifier.weight(0.4f))
+                                Box(
+                                    modifier = Modifier
+                                        .weight(0.3f)
+                                        .fillMaxHeight()
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onNext() }
                                 )
                             }
                         }
                     }
+
                 }
 
                 if (showActionMenu) {
@@ -1397,6 +1766,98 @@ fun getVideoDurationMs(context: android.content.Context, uri: Uri): Long {
             }
         }
     } catch (_: Exception) { 0L }
+}
+
+@Composable
+fun FastScrollbar(
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    itemCount: Int,
+    columns: Int,
+    modifier: Modifier = Modifier
+) {
+    val scope = rememberCoroutineScope()
+    val totalRows = (itemCount + columns - 1) / columns
+    if (totalRows <= 0) return
+
+    val firstVisibleRow by remember {
+        derivedStateOf {
+            gridState.firstVisibleItemIndex / columns
+        }
+    }
+    val visibleRowCount by remember {
+        derivedStateOf {
+            val info = gridState.layoutInfo
+            val visibleItems = info.visibleItemsInfo.size
+            (visibleItems + columns - 1) / columns
+        }
+    }
+
+    val thumbFraction = (visibleRowCount.toFloat() / totalRows).coerceIn(0.05f, 1f)
+    val scrollFraction = if (totalRows <= visibleRowCount) 0f
+        else (firstVisibleRow.toFloat() / (totalRows - visibleRowCount)).coerceIn(0f, 1f)
+
+    if (thumbFraction >= 1f) return // no scrollbar needed
+
+    Box(
+        modifier = modifier
+            .pointerInput(totalRows, columns) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    val y = change.position.y
+                    val fraction = (y / size.height).coerceIn(0f, 1f)
+                    val targetRow = (fraction * (totalRows - 1)).toInt()
+                    val targetIndex = (targetRow * columns).coerceIn(0, (itemCount - 1).coerceAtLeast(0))
+                    scope.launch {
+                        gridState.scrollToItem(targetIndex)
+                    }
+                }
+            }
+    ) {
+        val trackColor = Color.Gray.copy(0.2f)
+        val thumbColor = Color.Gray.copy(0.5f)
+
+        // Track
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(trackColor, RoundedCornerShape(4.dp))
+        )
+
+        // Thumb
+        val thumbHeight = (thumbFraction * 1f) // fraction of parent
+        val thumbOffset = scrollFraction * (1f - thumbFraction)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(thumbHeight)
+                .offset(y = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    // We need pixel calculation but offset takes dp
+                    0.dp // handled by padding instead
+                })
+                .padding(top = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    // approximate: fill parent and position thumb proportionally
+                    0.dp
+                })
+        )
+
+        // Draw thumb using drawWithContent
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    drawContent()
+                    val trackH = size.height
+                    val tHeight = trackH * thumbFraction
+                    val tTop = trackH * thumbOffset
+                    drawRoundRect(
+                        color = thumbColor,
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, tTop),
+                        size = Size(size.width, tHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+                    )
+                }
+        )
+    }
 }
 
 fun formatDuration(ms: Long): String {

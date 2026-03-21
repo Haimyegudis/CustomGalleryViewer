@@ -31,18 +31,30 @@ class Converters {
 }
 
 @Database(
-    entities = [PlaylistEntity::class, PlaylistItemEntity::class],
-    version = 3,  // Added isHidden field
+    entities = [PlaylistEntity::class, PlaylistItemEntity::class, WatchPositionEntity::class, FavoriteEntity::class],
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
+    abstract fun watchPositionDao(): WatchPositionDao
+    abstract fun favoriteDao(): FavoriteDao
 
     companion object {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE playlists ADD COLUMN isHidden INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS watch_positions (uri TEXT NOT NULL PRIMARY KEY, position INTEGER NOT NULL, duration INTEGER NOT NULL, updatedAt INTEGER NOT NULL DEFAULT 0)")
+            }
+        }
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS favorites (uri TEXT NOT NULL PRIMARY KEY, addedAt INTEGER NOT NULL DEFAULT 0)")
             }
         }
     }

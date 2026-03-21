@@ -192,7 +192,7 @@ fun AddPlaylistScreen(
                     )
                     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                         val options = listOf(
-                            "All" to MediaFilterType.MIXED,
+                            "Mix" to MediaFilterType.MIXED,
                             "Photos" to MediaFilterType.PHOTOS_ONLY,
                             "Videos" to MediaFilterType.VIDEO_ONLY
                         )

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.customgalleryviewer.data.FolderFileCache
 import com.example.customgalleryviewer.data.PlaylistWithItems
 import com.example.customgalleryviewer.data.SettingsManager
 import com.example.customgalleryviewer.repository.MediaRepository
@@ -28,7 +29,8 @@ class HomeViewModel @Inject constructor(
     private val repository: MediaRepository,
     @ApplicationContext private val context: Context,
     private val settingsManager: SettingsManager,
-    private val scanner: DeviceMediaScanner
+    private val scanner: DeviceMediaScanner,
+    private val folderFileCache: FolderFileCache
 ) : ViewModel() {
 
     val showHidden: StateFlow<Boolean> = settingsManager.showHiddenFlow
@@ -75,6 +77,43 @@ class HomeViewModel @Inject constructor(
             if (bucketId != null && uriStr != null) {
                 _folderCovers[bucketId] = Uri.parse(uriStr)
             }
+        }
+
+        // Background preloading of folder files and playlist files
+        viewModelScope.launch(Dispatchers.IO) {
+            // Preload all playlist files
+            try {
+                val allPlaylists = repository.getAllPlaylistsOnce()
+                allPlaylists.forEach { playlist ->
+                    launch {
+                        try {
+                            val cached = folderFileCache.getPlaylistFiles(playlist.id)
+                            if (cached.isEmpty()) {
+                                // Pre-scan if no cache exists
+                                repository.getMediaFilesFlow(playlist.id).collect { batch ->
+                                    folderFileCache.savePlaylistFiles(playlist.id, batch)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Preload device folder files
+            try {
+                val folders = scanner.getAllMediaFolders()
+                folders.forEach { folder ->
+                    launch {
+                        try {
+                            val cached = folderFileCache.getFolderFiles(folder.bucketId)
+                            if (cached.isEmpty()) {
+                                val files = scanner.getFilesInFolder(folder.bucketId)
+                                folderFileCache.saveFolderFiles(folder.bucketId, files)
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
