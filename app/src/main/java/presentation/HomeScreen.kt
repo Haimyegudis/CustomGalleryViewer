@@ -419,6 +419,8 @@ private fun AllPhotosContent(
     var renameFolderTarget by remember { mutableStateOf<MediaFolder?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteFolderConfirm by remember { mutableStateOf<MediaFolder?>(null) }
+    var selectedFolders by remember { mutableStateOf(setOf<Long>()) }
+    val isFolderSelectionMode = selectedFolders.isNotEmpty()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -444,30 +446,41 @@ private fun AllPhotosContent(
             )
         }
     } else {
+        Column {
+        // Selection header for folders
+        if (isFolderSelectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { selectedFolders = emptySet() }) { Text("Cancel", color = MaterialTheme.colorScheme.primary) }
+                Text("${selectedFolders.size} selected", fontWeight = FontWeight.SemiBold)
+                IconButton(onClick = { selectedFolders = folders.map { it.bucketId }.toSet() }) { Icon(Icons.Default.SelectAll, "Select All") }
+            }
+        }
+
         when (viewMode) {
             "list" -> {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().weight(1f),
                     contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
                     items(folders) { folder ->
                         val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
                         val displayUri = customCover ?: folder.thumbnailUri
+                        val isSel = folder.bucketId in selectedFolders
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .pointerInput(Unit) {
+                                .background(if (isSel) MaterialTheme.colorScheme.primary.copy(0.15f) else Color.Transparent)
+                                .pointerInput(isFolderSelectionMode) {
                                     detectTapGestures(
-                                        onTap = { onFolderClick(folder) },
-                                        onLongPress = {
-                                            scope.launch(Dispatchers.IO) {
-                                                val files = viewModel.getFilesInFolder(folder.bucketId)
-                                                withContext(Dispatchers.Main) {
-                                                    coverPickerFiles = files
-                                                    coverPickerFolder = folder
-                                                }
-                                            }
-                                        }
+                                        onTap = {
+                                            if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
+                                            else onFolderClick(folder)
+                                        },
+                                        onLongPress = { menuFolder = folder }
                                     )
                                 }
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -499,23 +512,58 @@ private fun AllPhotosContent(
                 // Grid view (default and "hero")
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(folders) { folder ->
                         val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                        val isSel = folder.bucketId in selectedFolders
                         DeviceFolderCard(
                             folder = folder,
                             customCoverUri = customCover,
-                            onClick = { onFolderClick(folder) },
+                            onClick = {
+                                if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
+                                else onFolderClick(folder)
+                            },
                             onLongPress = { menuFolder = folder }
                         )
                     }
                 }
             }
         }
+
+        // Bottom bar for folder selection
+        if (isFolderSelectionMode) {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shadowElevation = 8.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable {
+                            scope.launch(Dispatchers.IO) {
+                                selectedFolders.forEach { bucketId ->
+                                    val f = folders.find { it.bucketId == bucketId }
+                                    if (f != null) java.io.File(f.path).deleteRecursively()
+                                }
+                                withContext(Dispatchers.Main) {
+                                    selectedFolders = emptySet()
+                                    viewModel.loadDeviceFolders()
+                                }
+                            }
+                        }.padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurface)
+                        Text("Delete", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        }
+        } // end Column
     }
 
     // Folder long-press menu
@@ -526,6 +574,14 @@ private fun AllPhotosContent(
             title = { Text(folder.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             text = {
                 Column {
+                    TextButton(onClick = {
+                        selectedFolders = selectedFolders + folder.bucketId
+                        menuFolder = null
+                    }) {
+                        Icon(Icons.Default.CheckBox, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Select")
+                    }
                     TextButton(onClick = {
                         menuFolder = null
                         renameText = folder.name

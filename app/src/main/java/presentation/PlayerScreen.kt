@@ -221,12 +221,21 @@ fun GalleryGridView(
     onBackToHome: () -> Unit,
     onBrowseFolder: (Uri, String) -> Unit = { _, _ -> },
     onToggleFavorite: (Uri) -> Unit = {},
-    onDeleteItem: (Uri) -> Unit = {}
+    onDeleteItem: (Uri) -> Unit = {},
+    initialScrollIndex: Int = 0,
+    initialScrollOffset: Int = 0,
+    onScrollChanged: (Int, Int) -> Unit = { _, _ -> }
 ) {
     var showSearch by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var localSort by remember { mutableStateOf("default") }
-    val gridState = rememberLazyGridState()
+    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = initialScrollIndex, initialFirstVisibleItemScrollOffset = initialScrollOffset)
+
+    // Report scroll position
+    LaunchedEffect(Unit) {
+        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) -> onScrollChanged(idx, off) }
+    }
     val listState = rememberLazyListState()
 
     val context = LocalContext.current

@@ -27,8 +27,13 @@ fun DeviceFolderScreen(
     val isGalleryMode by viewModel.isGalleryMode.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val watchPositions by viewModel.watchPositions.collectAsState()
+    val favoriteUris by viewModel.favoriteUris.collectAsState()
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val context = LocalContext.current
+
+    // Hoist scroll position to survive gallery/player toggle
+    val scrollIndex = remember { mutableIntStateOf(0) }
+    val scrollOffset = remember { mutableIntStateOf(0) }
 
     var gridColumns by remember { mutableIntStateOf(3) }
     var searchQuery by remember { mutableStateOf("") }
@@ -96,12 +101,21 @@ fun DeviceFolderScreen(
                 searchQuery = searchQuery,
                 isLoading = isLoading,
                 mediaFilter = mediaFilter,
+                favoriteUris = favoriteUris,
                 watchPositions = watchPositions,
                 onItemClick = { uri -> viewModel.jumpToItem(uri) },
                 onColumnsChange = { gridColumns = it },
                 onSearchQueryChange = { searchQuery = it },
                 onMediaFilterChange = { mediaFilter = it },
-                onBackToHome = onBack
+                onBackToHome = onBack,
+                onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
+                onDeleteItem = { uri ->
+                    try { uri.path?.let { java.io.File(it).delete() } } catch (_: Exception) {}
+                    viewModel.loadFolder(bucketId, force = true)
+                },
+                initialScrollIndex = scrollIndex.intValue,
+                initialScrollOffset = scrollOffset.intValue,
+                onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }
             )
         } else {
             // Read persistent playback settings
