@@ -64,89 +64,7 @@ class MainActivity : ComponentActivity() {
             CustomGalleryViewerTheme {
                 var showSplash by remember { mutableStateOf(true) }
 
-                // Splash screen - dynamic grid animation
-                AnimatedVisibility(
-                    visible = showSplash,
-                    exit = fadeOut(animationSpec = tween(500))
-                ) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "splash")
-                    val time by infiniteTransition.animateFloat(
-                        initialValue = 0f, targetValue = 360f,
-                        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
-                        label = "time"
-                    )
-
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(Color(0xFF0D0D0D)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val gridSize = 5
-                        val colors = listOf(
-                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
-                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
-                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
-                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
-                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
-                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
-                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
-                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
-                            Color(0xFF00E5FF)
-                        )
-
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            for (row in 0 until gridSize) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    for (col in 0 until gridSize) {
-                                        val index = row * gridSize + col
-                                        val phase = index * 30f
-                                        val animScale = remember { Animatable(0f) }
-                                        LaunchedEffect(Unit) {
-                                            delay((index * 40).toLong())
-                                            animScale.animateTo(1f, animationSpec = spring(dampingRatio = 0.4f, stiffness = 300f))
-                                        }
-
-                                        val wave = sin(Math.toRadians((time + phase).toDouble())).toFloat()
-                                        val offsetX = wave * 8f
-                                        val offsetY = cos(Math.toRadians((time + phase * 1.3).toDouble())).toFloat() * 8f
-                                        val rotation = wave * 45f
-                                        val dynamicScale = 0.7f + (wave + 1f) * 0.2f
-
-                                        Box(
-                                            modifier = Modifier
-                                                .size(42.dp)
-                                                .graphicsLayer {
-                                                    scaleX = animScale.value * dynamicScale
-                                                    scaleY = animScale.value * dynamicScale
-                                                    rotationZ = rotation
-                                                    translationX = offsetX
-                                                    translationY = offsetY
-                                                    alpha = animScale.value
-                                                }
-                                                .clip(RoundedCornerShape((4 + wave * 4).dp))
-                                                .background(colors[index % colors.size].copy(alpha = 0.85f))
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(Modifier.height(24.dp))
-                            Text(
-                                "Gallery Viewer",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.9f)
-                            )
-                        }
-                    }
-                }
-
-                LaunchedEffect(Unit) {
-                    delay(2000)
-                    showSplash = false
-                }
+                Box(modifier = Modifier.fillMaxSize()) {
 
                 // One-time permission request at startup
                 val permissionLauncher = rememberLauncherForActivityResult(
@@ -250,6 +168,82 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
+                // Splash overlay on top of main content
+                AnimatedVisibility(
+                    visible = showSplash,
+                    exit = fadeOut(animationSpec = tween(500))
+                ) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "splash")
+                    val time by infiniteTransition.animateFloat(
+                        initialValue = 0f, targetValue = 360f,
+                        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing)),
+                        label = "time"
+                    )
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color(0xFF0D0D0D)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val gridSize = 5
+                        val colors = listOf(
+                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
+                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
+                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
+                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
+                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
+                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
+                            Color(0xFF00E5FF), Color(0xFF6200EE), Color(0xFFFF6B6B),
+                            Color(0xFF03DAC5), Color(0xFFBB86FC), Color(0xFFFFD700),
+                            Color(0xFF00E5FF)
+                        )
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            for (row in 0 until gridSize) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    for (col in 0 until gridSize) {
+                                        val index = row * gridSize + col
+                                        val phase = index * 30f
+                                        val animScale = remember { Animatable(0f) }
+                                        LaunchedEffect(Unit) {
+                                            delay((index * 40).toLong())
+                                            animScale.animateTo(1f, animationSpec = spring(dampingRatio = 0.4f, stiffness = 300f))
+                                        }
+                                        val wave = sin(Math.toRadians((time + phase).toDouble())).toFloat()
+                                        val offsetX = wave * 12f
+                                        val offsetY = cos(Math.toRadians((time + phase * 1.3).toDouble())).toFloat() * 12f
+                                        val rotation = wave * 60f
+                                        val dynamicScale = 0.6f + (wave + 1f) * 0.25f
+                                        Box(
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .graphicsLayer {
+                                                    scaleX = animScale.value * dynamicScale
+                                                    scaleY = animScale.value * dynamicScale
+                                                    rotationZ = rotation
+                                                    translationX = offsetX
+                                                    translationY = offsetY
+                                                    alpha = animScale.value
+                                                }
+                                                .clip(RoundedCornerShape((4 + wave * 6).dp))
+                                                .background(colors[index % colors.size].copy(alpha = 0.9f))
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(32.dp))
+                            Text("Gallery Viewer", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    delay(2200)
+                    showSplash = false
+                }
+
+                } // end Box
             }
         }
     }
