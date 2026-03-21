@@ -151,7 +151,14 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        // Show cached files instantly before launching coroutine
+        loadedPlaylistId = playlistId
+        currentGallerySort = null
+        currentPlaybackSort = null
+        originalRawSet.clear()
+        history.clear()
+        currentHistoryIndex = -1
+
+        // Show cached files instantly
         val cached = folderFileCache.getPlaylistFiles(playlistId)
         if (cached.isNotEmpty()) {
             originalRawSet.addAll(cached)
@@ -167,16 +174,9 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
+        // Background scan for fresh data
         viewModelScope.launch {
             if (cached.isEmpty()) _isLoading.value = true
-            loadedPlaylistId = playlistId
-            currentGallerySort = null
-            currentPlaybackSort = null
-            if (cached.isEmpty()) {
-                originalRawSet.clear()
-                history.clear()
-                currentHistoryIndex = -1
-            }
 
             Log.d("PlayerViewModel", "Starting to load playlist $playlistId")
 
