@@ -226,7 +226,7 @@ class MainActivity : ComponentActivity() {
                                                     translationY = offsetY
                                                     alpha = animScale.value
                                                 }
-                                                .clip(RoundedCornerShape((4 + wave * 6).dp))
+                                                .clip(RoundedCornerShape((4 + (wave + 1f) * 6).dp))
                                                 .background(colors[index % colors.size].copy(alpha = 0.9f))
                                         )
                                     }
