@@ -203,7 +203,7 @@ fun VideoPlayer(
                     System.currentTimeMillis() - manualNavTime > 500
                 ) {
                     endHandledForGeneration = mediaGeneration
-                    delay(300)
+                    delay(100)
                     if (System.currentTimeMillis() - manualNavTime > 500) {
                         onNext()
                     }

@@ -19,6 +19,9 @@ import com.example.customgalleryviewer.data.WatchPositionEntity
 import com.example.customgalleryviewer.util.DeviceMediaScanner
 import com.example.customgalleryviewer.util.FileScanner
 import java.io.File
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +87,8 @@ class DeviceFolderViewModel @Inject constructor(
                 _files.value = cached
                 playbackList = cached
                 _isLoading.value = false
+                // Pre-warm cache for cached files
+                preWarmCache(cached.take(50))
                 // Still refresh in background
             }
         }
@@ -134,6 +139,8 @@ class DeviceFolderViewModel @Inject constructor(
                 playbackList = allFiles
                 Log.w("DeviceFolderVM", "scan complete: ${allFiles.size} files, first=${allFiles.firstOrNull()}")
                 folderFileCache.saveFolderFiles(bucketId, allFiles)
+                // Pre-warm image cache for first 50 files
+                preWarmCache(allFiles.take(50))
             }
             _isLoading.value = false
         }
@@ -226,6 +233,21 @@ class DeviceFolderViewModel @Inject constructor(
             attempts++
         } while (candidate in recentIndices && attempts < 20)
         return candidate
+    }
+
+    private fun preWarmCache(uris: List<Uri>) {
+        val imageLoader = ImageLoader.Builder(context).build()
+        uris.forEach { uri ->
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .decoderFactory(VideoFrameDecoder.Factory())
+                .size(200)
+                .memoryCacheKey(uri.toString())
+                .diskCacheKey(uri.toString())
+                .allowHardware(true)
+                .build()
+            imageLoader.enqueue(request)
+        }
     }
 
     fun setGalleryMode(mode: Boolean) {

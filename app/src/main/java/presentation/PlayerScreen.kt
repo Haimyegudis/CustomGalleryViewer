@@ -651,8 +651,11 @@ fun GalleryGridView(
                                 model = ImageRequest.Builder(itemContext)
                                     .data(uri)
                                     .decoderFactory(VideoFrameDecoder.Factory())
-                                    .crossfade(true)
+                                    .crossfade(false)
+                                    .allowHardware(true)
                                     .size(128)
+                                    .memoryCacheKey(uri.toString())
+                                    .diskCacheKey(uri.toString())
                                     .build(),
                                 contentDescription = null,
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
@@ -748,8 +751,11 @@ fun GalleryGridView(
                             model = ImageRequest.Builder(itemContext)
                                 .data(uri)
                                 .decoderFactory(VideoFrameDecoder.Factory())
-                                .crossfade(true)
-                                .size(256)
+                                .crossfade(false)
+                                .allowHardware(true)
+                                .size(200)
+                                .memoryCacheKey(uri.toString())
+                                .diskCacheKey(uri.toString())
                                 .build(),
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
@@ -1444,8 +1450,11 @@ fun FolderBrowseView(
                                         model = ImageRequest.Builder(context)
                                             .data(displayThumb)
                                             .decoderFactory(VideoFrameDecoder.Factory())
-                                            .crossfade(true)
-                                            .size(256)
+                                            .crossfade(false)
+                                            .allowHardware(true)
+                                            .size(200)
+                                            .memoryCacheKey(displayThumb.toString())
+                                            .diskCacheKey(displayThumb.toString())
                                             .build(),
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
@@ -1511,8 +1520,11 @@ fun FolderBrowseView(
                                     model = ImageRequest.Builder(fileContext)
                                         .data(item.uri)
                                         .decoderFactory(VideoFrameDecoder.Factory())
-                                        .crossfade(true)
-                                        .size(256)
+                                        .crossfade(false)
+                                        .allowHardware(true)
+                                        .size(200)
+                                        .memoryCacheKey(item.uri.toString())
+                                        .diskCacheKey(item.uri.toString())
                                         .build(),
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
@@ -1637,8 +1649,11 @@ fun FolderBrowseView(
                                         model = ImageRequest.Builder(context)
                                             .data(fileUri)
                                             .decoderFactory(VideoFrameDecoder.Factory())
-                                            .crossfade(true)
+                                            .crossfade(false)
+                                            .allowHardware(true)
                                             .size(200)
+                                            .memoryCacheKey(fileUri.toString())
+                                            .diskCacheKey(fileUri.toString())
                                             .build(),
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),

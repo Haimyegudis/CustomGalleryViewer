@@ -491,7 +491,7 @@ private fun AllPhotosContent(
                                 if (displayUri != null) {
                                     AsyncImage(
                                         model = ImageRequest.Builder(context).data(displayUri)
-                                            .decoderFactory(VideoFrameDecoder.Factory()).size(128).crossfade(true).build(),
+                                            .decoderFactory(VideoFrameDecoder.Factory()).size(128).crossfade(false).allowHardware(true).build(),
                                         contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
                                     )
                                 } else {
@@ -766,7 +766,7 @@ private fun AllPhotosContent(
                                     model = ImageRequest.Builder(ctx)
                                         .data(fileUri)
                                         .decoderFactory(VideoFrameDecoder.Factory())
-                                        .crossfade(true)
+                                        .crossfade(false).allowHardware(true)
                                         .size(200)
                                         .build(),
                                     contentDescription = null,
@@ -829,7 +829,7 @@ private fun DeviceFolderCard(
                     model = ImageRequest.Builder(context)
                         .data(displayUri)
                         .decoderFactory(VideoFrameDecoder.Factory())
-                        .crossfade(true)
+                        .crossfade(false).allowHardware(true)
                         .size(400)
                         .build(),
                     contentDescription = null,
@@ -933,7 +933,7 @@ fun PlaylistHeroCard(
                     model = ImageRequest.Builder(context)
                         .data(Uri.parse(item.playlist.thumbnailUri))
                         .decoderFactory(VideoFrameDecoder.Factory())
-                        .crossfade(true)
+                        .crossfade(false).allowHardware(true)
                         .build(),
                     contentDescription = null,
                     modifier = Modifier
@@ -1194,7 +1194,7 @@ private fun PlaylistGridCard(
                     model = ImageRequest.Builder(context)
                         .data(Uri.parse(item.playlist.thumbnailUri))
                         .decoderFactory(VideoFrameDecoder.Factory())
-                        .crossfade(true)
+                        .crossfade(false).allowHardware(true)
                         .size(400)
                         .build(),
                     contentDescription = null,
@@ -1283,7 +1283,7 @@ private fun PlaylistListRow(
                         model = ImageRequest.Builder(context)
                             .data(Uri.parse(item.playlist.thumbnailUri))
                             .decoderFactory(VideoFrameDecoder.Factory())
-                            .crossfade(true)
+                            .crossfade(false).allowHardware(true)
                             .size(200)
                             .build(),
                         contentDescription = null,
