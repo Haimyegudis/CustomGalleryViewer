@@ -184,6 +184,8 @@ fun PlayerScreen(
                     onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) },
                     onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                     onDeleteItem = { uri -> viewModel.removeFromList(uri) },
+                    initialSort = settingsViewModel.getLocalSort(),
+                    onSortChange = { settingsViewModel.setLocalSort(it) },
                     onRefresh = {
                         // Force reload by clearing loaded state
                         viewModel.forceReload(playlistId)
@@ -234,13 +236,15 @@ fun GalleryGridView(
     onToggleFavorite: (Uri) -> Unit = {},
     onDeleteItem: (Uri) -> Unit = {},
     onRefresh: () -> Unit = {},
+    initialSort: String = "default",
+    onSortChange: (String) -> Unit = {},
     initialScrollIndex: Int = 0,
     initialScrollOffset: Int = 0,
     onScrollChanged: (Int, Int) -> Unit = { _, _ -> }
 ) {
     var showSearch by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
-    var localSort by remember { mutableStateOf("default") }
+    var localSort by remember { mutableStateOf(initialSort) }
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = initialScrollIndex, initialFirstVisibleItemScrollOffset = initialScrollOffset)
 
     // Report scroll position
@@ -351,27 +355,27 @@ fun GalleryGridView(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Default", fontWeight = if (localSort == "default") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "default"; showSortMenu = false }
+                            onClick = { localSort = "default"; onSortChange("default"); showSortMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("Name A-Z", fontWeight = if (localSort == "name") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "name"; showSortMenu = false }
+                            onClick = { localSort = "name"; onSortChange("name"); showSortMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("Name Z-A", fontWeight = if (localSort == "name_desc") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "name_desc"; showSortMenu = false }
+                            onClick = { localSort = "name_desc"; onSortChange("name_desc"); showSortMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("Date (Newest)", fontWeight = if (localSort == "date") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "date"; showSortMenu = false }
+                            onClick = { localSort = "date"; onSortChange("date"); showSortMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("Size (Largest)", fontWeight = if (localSort == "size") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "size"; showSortMenu = false }
+                            onClick = { localSort = "size"; onSortChange("size"); showSortMenu = false }
                         )
                         DropdownMenuItem(
                             text = { Text("Length (Longest)", fontWeight = if (localSort == "length") FontWeight.Bold else FontWeight.Normal) },
-                            onClick = { localSort = "length"; showSortMenu = false }
+                            onClick = { localSort = "length"; onSortChange("length"); showSortMenu = false }
                         )
                     }
                 }

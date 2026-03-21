@@ -108,6 +108,8 @@ fun DeviceFolderScreen(
                 onSearchQueryChange = { searchQuery = it },
                 onMediaFilterChange = { mediaFilter = it },
                 onBackToHome = onBack,
+                initialSort = settingsViewModel.getLocalSort(),
+                onSortChange = { settingsViewModel.setLocalSort(it) },
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                 onDeleteItem = { uri ->
                     try { uri.path?.let { java.io.File(it).delete() } } catch (_: Exception) {}
