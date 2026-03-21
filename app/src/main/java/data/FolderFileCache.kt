@@ -19,24 +19,52 @@ class FolderFileCache @Inject constructor(
 
     // In-memory cache for instant access
     private val memCache = java.util.concurrent.ConcurrentHashMap<String, List<Uri>>()
+    @Volatile private var folderCacheWarmed = false
+    @Volatile private var playlistCacheWarmed = false
+
+    // Preload all folder caches into memory on first access - makes subsequent calls instant
+    private fun warmFolderCache() {
+        if (folderCacheWarmed) return
+        folderCacheWarmed = true
+        try {
+            prefs.all.forEach { (key, value) ->
+                if (key.startsWith("folder_") && value is String && value.isNotEmpty()) {
+                    val list = value.split("\n").filter { it.isNotEmpty() }.map { Uri.parse(it) }
+                    if (list.isNotEmpty() && list.first().scheme == "file") {
+                        memCache[key] = list
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun warmPlaylistCache() {
+        if (playlistCacheWarmed) return
+        playlistCacheWarmed = true
+        try {
+            playlistPrefs.all.forEach { (key, value) ->
+                if (key.startsWith("playlist_") && value is String && value.isNotEmpty()) {
+                    val list = value.split("\n").filter { it.isNotEmpty() }.map { Uri.parse(it) }
+                    memCache[key] = list
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    init {
+        // Warm caches on a background thread at singleton creation
+        Thread {
+            warmFolderCache()
+            warmPlaylistCache()
+        }.start()
+    }
 
     fun getFolderFiles(bucketId: Long): List<Uri> {
         val key = "folder_$bucketId"
-        memCache[key]?.let { cached ->
-            // Invalidate stale content:// URIs - only return file:// URIs
-            if (cached.isNotEmpty() && cached.first().scheme != "file") {
-                memCache.remove(key)
-                return emptyList()
-            }
-            return cached
-        }
-        val fromDisk = loadFromDisk(key, prefs)
-        // Invalidate stale content:// URIs
-        if (fromDisk.isNotEmpty() && fromDisk.first().scheme != "file") {
-            prefs.edit().remove(key).apply()
-            return emptyList()
-        }
-        return fromDisk
+        memCache[key]?.let { return it }
+        // Fallback: warm cache if not yet done, then try again
+        if (!folderCacheWarmed) { warmFolderCache(); memCache[key]?.let { return it } }
+        return emptyList()
     }
 
     fun saveFolderFiles(bucketId: Long, files: List<Uri>) {
@@ -48,7 +76,8 @@ class FolderFileCache @Inject constructor(
     fun getPlaylistFiles(playlistId: Long): List<Uri> {
         val key = "playlist_$playlistId"
         memCache[key]?.let { return it }
-        return loadFromDisk(key, playlistPrefs)
+        if (!playlistCacheWarmed) { warmPlaylistCache(); memCache[key]?.let { return it } }
+        return emptyList()
     }
 
     fun savePlaylistFiles(playlistId: Long, files: List<Uri>) {
