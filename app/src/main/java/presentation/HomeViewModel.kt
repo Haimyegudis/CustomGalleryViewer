@@ -90,9 +90,13 @@ class HomeViewModel @Inject constructor(
                         try {
                             val cached = folderFileCache.getPlaylistFiles(playlist.id)
                             if (cached.isEmpty()) {
-                                // Pre-scan if no cache exists
+                                // Pre-scan if no cache exists - accumulate ALL batches
+                                val allFiles = mutableListOf<android.net.Uri>()
                                 repository.getMediaFilesFlow(playlist.id).collect { batch ->
-                                    folderFileCache.savePlaylistFiles(playlist.id, batch)
+                                    allFiles.addAll(batch)
+                                }
+                                if (allFiles.isNotEmpty()) {
+                                    folderFileCache.savePlaylistFiles(playlist.id, allFiles)
                                 }
                             }
                         } catch (_: Exception) {}
