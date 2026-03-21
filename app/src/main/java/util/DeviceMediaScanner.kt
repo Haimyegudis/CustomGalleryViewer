@@ -25,6 +25,15 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
     // Maps synthetic bucket IDs to filesystem paths for folders not in MediaStore
     private val syntheticFolderPaths = mutableMapOf<Long, String>()
 
+    // Cache folder paths (both synthetic and MediaStore-resolved) to avoid repeated queries
+    private val folderPathCache = mutableMapOf<Long, String>()
+
+    // In-memory cache of last scan result for instant access
+    @Volatile
+    private var cachedFolders: List<MediaFolder>? = null
+
+    fun getCachedFolders(): List<MediaFolder>? = cachedFolders
+
     fun getAllMediaFolders(): List<MediaFolder> {
         val folders = mutableMapOf<Long, MutableMediaFolder>()
 
@@ -85,6 +94,9 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
             .map { MediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri, it.count) }
             .sortedByDescending { it.mediaCount }
         Log.w(TAG, "getAllMediaFolders: found ${result.size} folders: ${result.map { "${it.name}(${it.mediaCount})" }}")
+        // Cache result and populate path cache for instant getFolderPath() lookups
+        cachedFolders = result
+        result.forEach { folderPathCache[it.bucketId] = it.path }
         return result
     }
 
@@ -182,8 +194,14 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
     }
 
     fun getFolderPath(bucketId: Long): String? {
+        // Check in-memory path cache first (populated by getAllMediaFolders)
+        folderPathCache[bucketId]?.let { return it }
+
         val syntheticPath = syntheticFolderPaths[bucketId]
-        if (syntheticPath != null) return syntheticPath
+        if (syntheticPath != null) {
+            folderPathCache[bucketId] = syntheticPath
+            return syntheticPath
+        }
 
         // Query MediaStore for the folder path
         try {
@@ -198,7 +216,11 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
                     val dataIdx = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
                     if (dataIdx >= 0) {
                         val path = cursor.getString(dataIdx)
-                        if (!path.isNullOrBlank()) return path.substringBeforeLast('/')
+                        if (!path.isNullOrBlank()) {
+                            val folderPath = path.substringBeforeLast('/')
+                            folderPathCache[bucketId] = folderPath
+                            return folderPath
+                        }
                     }
                 }
             }
@@ -214,7 +236,11 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
                     val dataIdx = cursor.getColumnIndex(MediaStore.Video.Media.DATA)
                     if (dataIdx >= 0) {
                         val path = cursor.getString(dataIdx)
-                        if (!path.isNullOrBlank()) return path.substringBeforeLast('/')
+                        if (!path.isNullOrBlank()) {
+                            val folderPath = path.substringBeforeLast('/')
+                            folderPathCache[bucketId] = folderPath
+                            return folderPath
+                        }
                     }
                 }
             }

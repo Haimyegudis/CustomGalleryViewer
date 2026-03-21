@@ -84,7 +84,7 @@ fun HomeScreen(
     var homeViewMode by remember { mutableStateOf(settingsViewModel.getHomeViewMode()) }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 1) viewModel.loadDeviceFolders(force = true)
+        if (selectedTab == 1) viewModel.loadDeviceFolders()
     }
 
     Scaffold(

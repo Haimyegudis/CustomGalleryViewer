@@ -80,6 +80,9 @@ class HomeViewModel @Inject constructor(
             }
         }
 
+        // Eagerly load device folders at startup (show cached instantly, refresh in background)
+        loadDeviceFolders()
+
         // Background preloading of folder files and playlist files
         viewModelScope.launch(Dispatchers.IO) {
             // Preload all playlist files
@@ -106,7 +109,8 @@ class HomeViewModel @Inject constructor(
 
             // Preload device folder files using FileScanner (produces file:// URIs)
             try {
-                val folders = scanner.getAllMediaFolders()
+                // Use cached folders if already available, otherwise scan
+                val folders = scanner.getCachedFolders() ?: scanner.getAllMediaFolders()
                 val fileScanner = com.example.customgalleryviewer.util.FileScanner(context, cacheManager, settingsManager.getShowHidden())
                 folders.forEach { folder ->
                     launch {
