@@ -779,16 +779,23 @@ fun GalleryGridView(
                         }
 
                         // Favorite heart overlay (always visible, tappable)
-                        Icon(
-                            if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            null,
-                            tint = if (isFav) Color(0xFFFF6B6B) else Color.White.copy(0.5f),
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
-                                .padding(4.dp)
-                                .size(16.dp)
-                                .clickable { onToggleFavorite(uri) }
-                        )
+                                .size(32.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { onToggleFavorite(uri) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                null,
+                                tint = if (isFav) Color(0xFFFF6B6B) else Color.White.copy(0.4f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
 
                         // Selection checkbox overlay
                         if (isSelectionMode) {
@@ -866,18 +873,58 @@ fun GalleryGridView(
                                     Text("More", fontSize = 10.sp)
                                 }
                             }
+                            var multiSelectOp by remember { mutableStateOf<com.example.customgalleryviewer.presentation.components.FileOperation?>(null) }
+
+                            if (multiSelectOp != null) {
+                                com.example.customgalleryviewer.presentation.components.MultiFolderPickerDialog(
+                                    uris = selectedItems.toList(),
+                                    operation = multiSelectOp!!,
+                                    onDismiss = { multiSelectOp = null },
+                                    onComplete = {
+                                        multiSelectOp = null
+                                        selectedItems = emptySet()
+                                        isSelectionMode = false
+                                    }
+                                )
+                            }
+
                             DropdownMenu(
                                 expanded = showSelectionMoreMenu,
                                 onDismissRequest = { showSelectionMoreMenu = false }
                             ) {
                                 DropdownMenuItem(
+                                    text = { Text("Copy to...") },
+                                    leadingIcon = { Icon(Icons.Default.FileCopy, null) },
+                                    onClick = {
+                                        showSelectionMoreMenu = false
+                                        multiSelectOp = com.example.customgalleryviewer.presentation.components.FileOperation.COPY
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Move to...") },
+                                    leadingIcon = { Icon(Icons.Default.DriveFileMove, null) },
+                                    onClick = {
+                                        showSelectionMoreMenu = false
+                                        multiSelectOp = com.example.customgalleryviewer.presentation.components.FileOperation.MOVE
+                                    }
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Share") },
                                     leadingIcon = { Icon(Icons.Default.Share, null) },
                                     onClick = {
                                         showSelectionMoreMenu = false
+                                        val shareUris = ArrayList(selectedItems.map { uri ->
+                                            if (uri.scheme == "file" && uri.path != null) {
+                                                try {
+                                                    androidx.core.content.FileProvider.getUriForFile(
+                                                        context, "${context.packageName}.fileprovider", java.io.File(uri.path!!)
+                                                    )
+                                                } catch (_: Exception) { uri }
+                                            } else uri
+                                        })
                                         val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
                                             type = "*/*"
-                                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(selectedItems.toList()))
+                                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, shareUris)
                                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                         }
                                         context.startActivity(Intent.createChooser(shareIntent, "Share"))

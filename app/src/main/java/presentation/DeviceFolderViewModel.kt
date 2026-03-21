@@ -65,22 +65,49 @@ class DeviceFolderViewModel @Inject constructor(
         if (!force && loadedBucketId == bucketId && _files.value.isNotEmpty()) return
         loadedBucketId = bucketId
 
-        // Show cached files synchronously for instant display
+        // Show cached files synchronously - only use file:// URIs (not stale content:// URIs)
         if (!force) {
             val cached = folderFileCache.getFolderFiles(bucketId)
-            if (cached.isNotEmpty()) {
+            if (cached.isNotEmpty() && cached.first().scheme == "file") {
                 _files.value = cached
                 playbackList = cached
                 _isLoading.value = false
-                return
+                // Still refresh in background
             }
         }
 
-        _isLoading.value = true
+        if (_files.value.isEmpty()) _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
             val folderPath = scanner.getFolderPath(bucketId)
-            if (folderPath != null) {
-                val folderUri = android.net.Uri.fromFile(File(folderPath))
+            val scanPath = folderPath ?: run {
+                // Fallback: try to get path from MediaStore files
+                val contentFiles = scanner.getFilesInFolder(bucketId)
+                if (contentFiles.isNotEmpty()) {
+                    // Convert content URIs by resolving paths
+                    val resolved = contentFiles.mapNotNull { uri ->
+                        try {
+                            if (uri.scheme == "file") return@mapNotNull uri
+                            context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                                if (c.moveToFirst()) {
+                                    val path = c.getString(0)
+                                    if (!path.isNullOrBlank()) android.net.Uri.fromFile(File(path)) else null
+                                } else null
+                            }
+                        } catch (_: Exception) { null }
+                    }
+                    if (resolved.isNotEmpty()) {
+                        _files.value = resolved
+                        playbackList = resolved
+                        _isLoading.value = false
+                        folderFileCache.saveFolderFiles(bucketId, resolved)
+                        return@launch
+                    }
+                }
+                null
+            }
+
+            if (scanPath != null) {
+                val folderUri = android.net.Uri.fromFile(File(scanPath))
                 val fileScanner = createScanner()
                 val allFiles = mutableListOf<Uri>()
                 fileScanner.scanPlaylistItemsFlow(
@@ -93,11 +120,6 @@ class DeviceFolderViewModel @Inject constructor(
                 }
                 playbackList = allFiles
                 folderFileCache.saveFolderFiles(bucketId, allFiles)
-            } else {
-                val files = scanner.getFilesInFolder(bucketId)
-                _files.value = files
-                playbackList = files
-                folderFileCache.saveFolderFiles(bucketId, files)
             }
             _isLoading.value = false
         }

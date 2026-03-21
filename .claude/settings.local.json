@@ -40,7 +40,9 @@
       "Bash(find /tmp/vlc-android-repo/src/android -type f -name *.kt -o -name *.java)",
       "Bash(find /tmp/vlc-android -type f -path *gui/view* -name *.kt -o -path *gui/view* -name *.java)",
       "Bash(find /tmp/vlc-android -name *Scroll* -type f)",
-      "Bash(grep -E \"\\\\.\\(kt|java\\)$\")"
+      "Bash(grep -E \"\\\\.\\(kt|java\\)$\")",
+      "Bash(rm -f \"C:\\\\Users\\\\yegudish\\\\AndroidStudioProjects\\\\CustomGalleryViewer\\\\.git\\\\index.lock\")",
+      "Bash(rm -f C:/Users/yegudish/AndroidStudioProjects/CustomGalleryViewer/.git/index.lock)"
     ]
   }
 }

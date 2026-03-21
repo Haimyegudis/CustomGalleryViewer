@@ -22,8 +22,21 @@ class FolderFileCache @Inject constructor(
 
     fun getFolderFiles(bucketId: Long): List<Uri> {
         val key = "folder_$bucketId"
-        memCache[key]?.let { return it }
-        return loadFromDisk(key, prefs)
+        memCache[key]?.let { cached ->
+            // Invalidate stale content:// URIs - only return file:// URIs
+            if (cached.isNotEmpty() && cached.first().scheme != "file") {
+                memCache.remove(key)
+                return emptyList()
+            }
+            return cached
+        }
+        val fromDisk = loadFromDisk(key, prefs)
+        // Invalidate stale content:// URIs
+        if (fromDisk.isNotEmpty() && fromDisk.first().scheme != "file") {
+            prefs.edit().remove(key).apply()
+            return emptyList()
+        }
+        return fromDisk
     }
 
     fun saveFolderFiles(bucketId: Long, files: List<Uri>) {
