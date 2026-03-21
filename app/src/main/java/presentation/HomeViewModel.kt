@@ -132,8 +132,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun loadDeviceFolders() {
-        if (foldersLoaded) return
+    fun loadDeviceFolders(force: Boolean = false) {
+        if (!force && foldersLoaded) return
         foldersLoaded = true
 
         // Load cached folders instantly

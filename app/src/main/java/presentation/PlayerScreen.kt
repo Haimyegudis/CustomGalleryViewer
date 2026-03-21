@@ -254,6 +254,10 @@ fun GalleryGridView(
     // Context menu state
     var contextMenuUri by remember { mutableStateOf<Uri?>(null) }
 
+    // Folder picker for copy/move
+    var folderPickerUri by remember { mutableStateOf<Uri?>(null) }
+    var folderPickerOp by remember { mutableStateOf<com.example.customgalleryviewer.presentation.components.FileOperation?>(null) }
+
     // Rename dialog state
     var renameUri by remember { mutableStateOf<Uri?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -1038,6 +1042,32 @@ fun GalleryGridView(
                             Spacer(Modifier.width(12.dp))
                             Text("Rename", modifier = Modifier.weight(1f))
                         }
+                        // Copy to
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                folderPickerUri = menuUri
+                                folderPickerOp = com.example.customgalleryviewer.presentation.components.FileOperation.COPY
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.FileCopy, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Copy to...", modifier = Modifier.weight(1f))
+                        }
+                        // Move to
+                        TextButton(
+                            onClick = {
+                                contextMenuUri = null
+                                folderPickerUri = menuUri
+                                folderPickerOp = com.example.customgalleryviewer.presentation.components.FileOperation.MOVE
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.DriveFileMove, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Move to...", modifier = Modifier.weight(1f))
+                        }
                         // Share
                         TextButton(
                             onClick = {
@@ -1092,6 +1122,16 @@ fun GalleryGridView(
                     }
                 },
                 shape = RoundedCornerShape(20.dp)
+            )
+        }
+
+        // Folder picker for copy/move
+        if (folderPickerUri != null && folderPickerOp != null) {
+            com.example.customgalleryviewer.presentation.components.FolderPickerDialog(
+                uri = folderPickerUri!!,
+                operation = folderPickerOp!!,
+                onDismiss = { folderPickerUri = null; folderPickerOp = null },
+                onComplete = { folderPickerUri = null; folderPickerOp = null }
             )
         }
 

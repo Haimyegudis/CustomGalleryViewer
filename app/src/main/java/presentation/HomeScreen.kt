@@ -84,7 +84,7 @@ fun HomeScreen(
     var homeViewMode by remember { mutableStateOf(settingsViewModel.getHomeViewMode()) }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 1) viewModel.loadDeviceFolders()
+        if (selectedTab == 1) viewModel.loadDeviceFolders(force = true)
     }
 
     Scaffold(
@@ -537,6 +537,39 @@ private fun AllPhotosContent(
             }
         }
 
+        // Multi-folder delete confirmation
+        var showMultiDeleteConfirm by remember { mutableStateOf(false) }
+        if (showMultiDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showMultiDeleteConfirm = false },
+                title = { Text("Delete ${selectedFolders.size} folders?", fontWeight = FontWeight.SemiBold) },
+                text = { Text("All files inside will be permanently deleted. This cannot be undone.", color = MaterialTheme.colorScheme.onSurface.copy(0.7f)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showMultiDeleteConfirm = false
+                        val toDelete = selectedFolders.toSet()
+                        scope.launch(Dispatchers.IO) {
+                            var deleted = 0
+                            toDelete.forEach { bucketId ->
+                                val f = folders.find { it.bucketId == bucketId }
+                                if (f != null) {
+                                    val dir = java.io.File(f.path)
+                                    if (dir.exists() && dir.deleteRecursively()) deleted++
+                                }
+                            }
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "Deleted $deleted folders", android.widget.Toast.LENGTH_SHORT).show()
+                                selectedFolders = emptySet()
+                                viewModel.loadDeviceFolders(force = true)
+                            }
+                        }
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
+                },
+                dismissButton = { TextButton(onClick = { showMultiDeleteConfirm = false }) { Text("Cancel") } },
+                shape = RoundedCornerShape(20.dp)
+            )
+        }
+
         // Bottom bar for folder selection
         if (isFolderSelectionMode) {
             Surface(color = MaterialTheme.colorScheme.surfaceVariant, shadowElevation = 8.dp) {
@@ -548,14 +581,25 @@ private fun AllPhotosContent(
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.clickable {
+                            val toDelete = selectedFolders.toSet()
                             scope.launch(Dispatchers.IO) {
-                                selectedFolders.forEach { bucketId ->
+                                var deleted = 0
+                                toDelete.forEach { bucketId ->
                                     val f = folders.find { it.bucketId == bucketId }
-                                    if (f != null) java.io.File(f.path).deleteRecursively()
+                                    if (f != null) {
+                                        val dir = java.io.File(f.path)
+                                        android.util.Log.w("HomeScreen", "Deleting folder: ${dir.absolutePath} exists=${dir.exists()}")
+                                        if (dir.exists()) {
+                                            val ok = dir.deleteRecursively()
+                                            android.util.Log.w("HomeScreen", "Delete result: $ok")
+                                            if (ok) deleted++
+                                        }
+                                    }
                                 }
                                 withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(context, "Deleted $deleted of ${toDelete.size} folders", android.widget.Toast.LENGTH_SHORT).show()
                                     selectedFolders = emptySet()
-                                    viewModel.loadDeviceFolders()
+                                    viewModel.loadDeviceFolders(force = true)
                                 }
                             }
                         }.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -640,7 +684,7 @@ private fun AllPhotosContent(
                         val oldDir = java.io.File(folder.path)
                         val newDir = java.io.File(oldDir.parent, renameText.trim())
                         if (oldDir.exists() && oldDir.renameTo(newDir)) {
-                            viewModel.loadDeviceFolders()
+                            viewModel.loadDeviceFolders(force = true)
                         }
                         renameFolderTarget = null
                     }
@@ -663,7 +707,7 @@ private fun AllPhotosContent(
                     scope.launch(Dispatchers.IO) {
                         java.io.File(folder.path).deleteRecursively()
                         withContext(Dispatchers.Main) {
-                            viewModel.loadDeviceFolders()
+                            viewModel.loadDeviceFolders(force = true)
                             deleteFolderConfirm = null
                         }
                     }
@@ -773,7 +817,7 @@ private fun DeviceFolderCard(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .pointerInput(onClick, onLongPress) {
                     detectTapGestures(
                         onTap = { onClick() },
                         onLongPress = { onLongPress() }
