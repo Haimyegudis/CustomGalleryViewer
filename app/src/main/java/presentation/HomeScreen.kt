@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
@@ -235,7 +236,8 @@ fun HomeScreen(
                     onFolderClick = { folder ->
                         onNavigateToDeviceFolder(folder.bucketId)
                     },
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    viewMode = homeViewMode
                 )
             }
         }
@@ -407,12 +409,14 @@ private fun AllPhotosContent(
     folders: List<MediaFolder>,
     isScanning: Boolean,
     onFolderClick: (MediaFolder) -> Unit,
-    viewModel: HomeViewModel
+    viewModel: HomeViewModel,
+    viewMode: String = "hero"
 ) {
     // Cover picker state
     var coverPickerFolder by remember { mutableStateOf<MediaFolder?>(null) }
     var coverPickerFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     if (isScanning && folders.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -436,29 +440,84 @@ private fun AllPhotosContent(
             )
         }
     } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(folders) { folder ->
-                val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
-                DeviceFolderCard(
-                    folder = folder,
-                    customCoverUri = customCover,
-                    onClick = { onFolderClick(folder) },
-                    onLongPress = {
-                        scope.launch(Dispatchers.IO) {
-                            val files = viewModel.getFilesInFolder(folder.bucketId)
-                            withContext(Dispatchers.Main) {
-                                coverPickerFiles = files
-                                coverPickerFolder = folder
+        when (viewMode) {
+            "list" -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(folders) { folder ->
+                        val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                        val displayUri = customCover ?: folder.thumbnailUri
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { onFolderClick(folder) },
+                                        onLongPress = {
+                                            scope.launch(Dispatchers.IO) {
+                                                val files = viewModel.getFilesInFolder(folder.bucketId)
+                                                withContext(Dispatchers.Main) {
+                                                    coverPickerFiles = files
+                                                    coverPickerFolder = folder
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))) {
+                                if (displayUri != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context).data(displayUri)
+                                            .decoderFactory(VideoFrameDecoder.Factory()).size(128).crossfade(true).build(),
+                                        contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.3f))
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(folder.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${folder.mediaCount} files", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
                             }
                         }
                     }
-                )
+                }
+            }
+            else -> {
+                // Grid view (default and "hero")
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(folders) { folder ->
+                        val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                        DeviceFolderCard(
+                            folder = folder,
+                            customCoverUri = customCover,
+                            onClick = { onFolderClick(folder) },
+                            onLongPress = {
+                                scope.launch(Dispatchers.IO) {
+                                    val files = viewModel.getFilesInFolder(folder.bucketId)
+                                    withContext(Dispatchers.Main) {
+                                        coverPickerFiles = files
+                                        coverPickerFolder = folder
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
