@@ -525,6 +525,7 @@ private fun AllPhotosContent(
                             folder = folder,
                             customCoverUri = customCover,
                             isSelected = isSel,
+                            isSelectionMode = isFolderSelectionMode,
                             onClick = {
                                 if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
                                 else onFolderClick(folder)
@@ -753,6 +754,7 @@ private fun DeviceFolderCard(
     folder: MediaFolder,
     customCoverUri: Uri? = null,
     isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
     onClick: () -> Unit,
     onLongPress: () -> Unit = {}
 ) {
@@ -828,17 +830,23 @@ private fun DeviceFolderCard(
                 )
             }
 
-            // Selection checkbox
-            if (isSelected) {
+            // Selection checkbox - visible on all folders when in selection mode
+            if (isSelected || isSelectionMode) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(8.dp)
                         .size(24.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(0.4f),
+                            CircleShape
+                        )
+                        .then(if (!isSelected) Modifier.border(2.dp, Color.White.copy(0.6f), CircleShape) else Modifier),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    if (isSelected) {
+                        Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
