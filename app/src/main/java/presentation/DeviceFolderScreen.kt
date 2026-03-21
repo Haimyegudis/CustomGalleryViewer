@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -98,7 +99,8 @@ fun DeviceFolderScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (isGalleryMode) {
+        // Keep gallery always in composition to avoid recreation cost
+        Box(modifier = Modifier.fillMaxSize().then(if (isGalleryMode) Modifier else Modifier.size(0.dp))) {
             GalleryGridView(
                 items = filteredFiles,
                 currentUri = currentMedia,
@@ -125,7 +127,8 @@ fun DeviceFolderScreen(
                 initialScrollOffset = scrollOffset.intValue,
                 onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }
             )
-        } else {
+        }
+        if (!isGalleryMode) {
             // Read persistent playback settings
             val prefs = remember { context.getSharedPreferences("gallery_settings", android.content.Context.MODE_PRIVATE) }
             var isShuffleOn by remember { mutableStateOf(prefs.getBoolean("shuffle_on", false)) }
