@@ -26,6 +26,7 @@ fun DeviceFolderScreen(
     val currentMedia by viewModel.currentMedia.collectAsState()
     val isGalleryMode by viewModel.isGalleryMode.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val watchPositions by viewModel.watchPositions.collectAsState()
     val navigationMode by settingsViewModel.navigationMode.collectAsState()
     val context = LocalContext.current
 
@@ -95,6 +96,7 @@ fun DeviceFolderScreen(
                 searchQuery = searchQuery,
                 isLoading = isLoading,
                 mediaFilter = mediaFilter,
+                watchPositions = watchPositions,
                 onItemClick = { uri -> viewModel.jumpToItem(uri) },
                 onColumnsChange = { gridColumns = it },
                 onSearchQueryChange = { searchQuery = it },

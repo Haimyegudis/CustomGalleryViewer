@@ -53,6 +53,18 @@ class DeviceFolderViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Watch positions for progress display
+    private val _watchPositions = MutableStateFlow<Map<String, WatchPositionEntity>>(emptyMap())
+    val watchPositions: StateFlow<Map<String, WatchPositionEntity>> = _watchPositions.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            watchPositionDao.getAllPositionsFlow().collectLatest { positions ->
+                _watchPositions.value = positions.associateBy { it.uri }
+            }
+        }
+    }
+
     // History-based navigation
     private val history = java.util.Collections.synchronizedList(mutableListOf<Int>())
     private var currentHistoryIndex = -1

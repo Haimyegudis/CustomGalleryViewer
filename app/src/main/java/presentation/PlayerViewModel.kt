@@ -97,7 +97,16 @@ class PlayerViewModel @Inject constructor(
     private val _isRepeatListOn = MutableStateFlow(settingsManager.getRepeatListOn())
     val isRepeatListOn: StateFlow<Boolean> = _isRepeatListOn.asStateFlow()
 
+    // Watch positions for progress display
+    private val _watchPositions = MutableStateFlow<Map<String, com.example.customgalleryviewer.data.WatchPositionEntity>>(emptyMap())
+    val watchPositions: StateFlow<Map<String, com.example.customgalleryviewer.data.WatchPositionEntity>> = _watchPositions.asStateFlow()
+
     init {
+        viewModelScope.launch {
+            watchPositionDao.getAllPositionsFlow().collectLatest { positions ->
+                _watchPositions.value = positions.associateBy { it.uri }
+            }
+        }
         viewModelScope.launch {
             settingsManager.gallerySortFlow.collectLatest { sort ->
                 if (originalRawSet.isNotEmpty() && sort != currentGallerySort) {

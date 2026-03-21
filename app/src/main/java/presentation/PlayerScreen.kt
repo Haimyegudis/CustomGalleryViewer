@@ -102,6 +102,7 @@ fun PlayerScreen(
     val folderStack by viewModel.folderStack.collectAsState()
     val playlistFolders by viewModel.playlistFolders.collectAsState()
     val favoriteUris by viewModel.favoriteUris.collectAsState()
+    val watchPositions by viewModel.watchPositions.collectAsState()
     val context = LocalContext.current
 
     BackHandler(enabled = true) {
@@ -170,6 +171,7 @@ fun PlayerScreen(
                     mediaFilter = mediaFilter,
                     playlistFolders = playlistFolders,
                     favoriteUris = favoriteUris,
+                    watchPositions = watchPositions,
                     onItemClick = { uri -> viewModel.jumpToItem(uri) },
                     onColumnsChange = { viewModel.setGridColumns(it) },
                     onSearchQueryChange = { viewModel.setSearchQuery(it) },
@@ -211,6 +213,7 @@ fun GalleryGridView(
     mediaFilter: MediaFilterType,
     playlistFolders: List<Pair<Uri, String>> = emptyList(),
     favoriteUris: Set<String> = emptySet(),
+    watchPositions: Map<String, com.example.customgalleryviewer.data.WatchPositionEntity> = emptyMap(),
     onItemClick: (Uri) -> Unit,
     onColumnsChange: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -778,15 +781,33 @@ fun GalleryGridView(
                             }
                         }
 
+                        // Watch progress bar for videos
+                        if (isVideoItem) {
+                            val wp = watchPositions[uri.toString()]
+                            if (wp != null && wp.duration > 0) {
+                                val progress = (wp.position.toFloat() / wp.duration).coerceIn(0f, 1f)
+                                if (progress > 0.02f && progress < 0.95f) {
+                                    LinearProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .height(3.dp),
+                                        color = Color(0xFF00E5FF),
+                                        trackColor = Color.Black.copy(0.5f)
+                                    )
+                                }
+                            }
+                        }
+
                         // Favorite heart overlay (always visible, tappable)
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .size(32.dp)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { onToggleFavorite(uri) },
+                                .pointerInput(uri) {
+                                    detectTapGestures { onToggleFavorite(uri) }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
