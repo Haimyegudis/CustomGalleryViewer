@@ -415,6 +415,10 @@ private fun AllPhotosContent(
     // Cover picker state
     var coverPickerFolder by remember { mutableStateOf<MediaFolder?>(null) }
     var coverPickerFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var menuFolder by remember { mutableStateOf<MediaFolder?>(null) }
+    var renameFolderTarget by remember { mutableStateOf<MediaFolder?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteFolderConfirm by remember { mutableStateOf<MediaFolder?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -506,20 +510,109 @@ private fun AllPhotosContent(
                             folder = folder,
                             customCoverUri = customCover,
                             onClick = { onFolderClick(folder) },
-                            onLongPress = {
-                                scope.launch(Dispatchers.IO) {
-                                    val files = viewModel.getFilesInFolder(folder.bucketId)
-                                    withContext(Dispatchers.Main) {
-                                        coverPickerFiles = files
-                                        coverPickerFolder = folder
-                                    }
-                                }
-                            }
+                            onLongPress = { menuFolder = folder }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Folder long-press menu
+    if (menuFolder != null) {
+        val folder = menuFolder!!
+        AlertDialog(
+            onDismissRequest = { menuFolder = null },
+            title = { Text(folder.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        menuFolder = null
+                        renameText = folder.name
+                        renameFolderTarget = folder
+                    }) {
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Rename")
+                    }
+                    TextButton(onClick = {
+                        menuFolder = null
+                        scope.launch(Dispatchers.IO) {
+                            val files = viewModel.getFilesInFolder(folder.bucketId)
+                            withContext(Dispatchers.Main) {
+                                coverPickerFiles = files
+                                coverPickerFolder = folder
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Image, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Change Cover")
+                    }
+                    TextButton(onClick = { menuFolder = null; deleteFolderConfirm = folder }) {
+                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { menuFolder = null }) { Text("Cancel") } },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // Rename folder dialog
+    if (renameFolderTarget != null) {
+        AlertDialog(
+            onDismissRequest = { renameFolderTarget = null },
+            title = { Text("Rename Folder", fontWeight = FontWeight.SemiBold) },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text("Folder name") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (renameText.isNotBlank()) {
+                        val folder = renameFolderTarget!!
+                        val oldDir = java.io.File(folder.path)
+                        val newDir = java.io.File(oldDir.parent, renameText.trim())
+                        if (oldDir.exists() && oldDir.renameTo(newDir)) {
+                            viewModel.loadDeviceFolders()
+                        }
+                        renameFolderTarget = null
+                    }
+                }) { Text("Save", fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = { TextButton(onClick = { renameFolderTarget = null }) { Text("Cancel") } },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // Delete folder confirmation
+    if (deleteFolderConfirm != null) {
+        val folder = deleteFolderConfirm!!
+        AlertDialog(
+            onDismissRequest = { deleteFolderConfirm = null },
+            title = { Text("Delete Folder?", fontWeight = FontWeight.SemiBold) },
+            text = { Text("\"${folder.name}\" and all ${folder.mediaCount} files will be permanently deleted.", color = MaterialTheme.colorScheme.onSurface.copy(0.7f)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        java.io.File(folder.path).deleteRecursively()
+                        withContext(Dispatchers.Main) {
+                            viewModel.loadDeviceFolders()
+                            deleteFolderConfirm = null
+                        }
+                    }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = { TextButton(onClick = { deleteFolderConfirm = null }) { Text("Cancel") } },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 
     // Cover picker dialog

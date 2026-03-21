@@ -244,22 +244,11 @@ fun GalleryGridView(
     var selectedItems by remember { mutableStateOf<Set<Uri>>(emptySet()) }
     var showSelectionMoreMenu by remember { mutableStateOf(false) }
 
-    // Cache video durations asynchronously
-    var durationCache by remember { mutableStateOf<Map<Uri, Long>>(emptyMap()) }
-    LaunchedEffect(items) {
-        withContext(Dispatchers.IO) {
-            val cache = mutableMapOf<Uri, Long>()
-            items.forEach { uri ->
-                if (isVideo(uri.toString())) {
-                    cache[uri] = getVideoDurationMs(context, uri)
-                }
-            }
-            durationCache = cache
-        }
-    }
+    // Lazy duration cache - loads per visible item, never blocks UI
+    val durationCache = remember { androidx.compose.runtime.mutableStateMapOf<Uri, Long>() }
 
     // Local sort for this gallery view, with favorites pinned to top
-    val sortedItems = remember(items, localSort, durationCache, favoriteUris) {
+    val sortedItems = remember(items, localSort, if (localSort == "length") durationCache.size else 0, favoriteUris) {
         val sorted = when (localSort) {
             "name" -> items.sortedBy { it.lastPathSegment?.lowercase() ?: "" }
             "name_desc" -> items.sortedByDescending { it.lastPathSegment?.lowercase() ?: "" }
@@ -583,6 +572,15 @@ fun GalleryGridView(
                         val isFav = favoriteUris.contains(uri.toString())
                         val isInSelection = selectedItems.contains(uri)
 
+                        // Lazy load duration for visible video items
+                        if (isVideoItem && uri !in durationCache) {
+                            LaunchedEffect(uri) {
+                                withContext(Dispatchers.IO) {
+                                    durationCache[uri] = getVideoDurationMs(itemContext, uri)
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -686,6 +684,15 @@ fun GalleryGridView(
                     val isFav = favoriteUris.contains(uri.toString())
                     val isInSelection = selectedItems.contains(uri)
 
+                    // Lazy load duration for visible video items
+                    if (isVideoItem && uri !in durationCache) {
+                        LaunchedEffect(uri) {
+                            withContext(Dispatchers.IO) {
+                                durationCache[uri] = getVideoDurationMs(itemContext, uri)
+                            }
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .aspectRatio(1f)
@@ -771,17 +778,17 @@ fun GalleryGridView(
                             }
                         }
 
-                        // Favorite star overlay
-                        if (isFav) {
-                            Icon(
-                                Icons.Default.Star, null,
-                                tint = Color(0xFFFFD700),
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(3.dp)
-                                    .size(14.dp)
-                            )
-                        }
+                        // Favorite heart overlay (always visible, tappable)
+                        Icon(
+                            if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            null,
+                            tint = if (isFav) Color(0xFFFF6B6B) else Color.White.copy(0.5f),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(4.dp)
+                                .size(16.dp)
+                                .clickable { onToggleFavorite(uri) }
+                        )
 
                         // Selection checkbox overlay
                         if (isSelectionMode) {
