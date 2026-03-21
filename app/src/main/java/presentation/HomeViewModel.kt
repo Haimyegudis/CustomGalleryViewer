@@ -30,7 +30,8 @@ class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsManager: SettingsManager,
     private val scanner: DeviceMediaScanner,
-    private val folderFileCache: FolderFileCache
+    private val folderFileCache: FolderFileCache,
+    private val cacheManager: com.example.customgalleryviewer.data.MediaCacheManager
 ) : ViewModel() {
 
     val showHidden: StateFlow<Boolean> = settingsManager.showHiddenFlow
@@ -99,16 +100,30 @@ class HomeViewModel @Inject constructor(
                 }
             } catch (_: Exception) {}
 
-            // Preload device folder files
+            // Preload device folder files using FileScanner (produces file:// URIs)
             try {
                 val folders = scanner.getAllMediaFolders()
+                val fileScanner = com.example.customgalleryviewer.util.FileScanner(context, cacheManager, settingsManager.getShowHidden())
                 folders.forEach { folder ->
                     launch {
                         try {
                             val cached = folderFileCache.getFolderFiles(folder.bucketId)
                             if (cached.isEmpty()) {
-                                val files = scanner.getFilesInFolder(folder.bucketId)
-                                folderFileCache.saveFolderFiles(folder.bucketId, files)
+                                val folderPath = scanner.getFolderPath(folder.bucketId)
+                                if (folderPath != null) {
+                                    val folderUri = android.net.Uri.fromFile(java.io.File(folderPath))
+                                    val allFiles = mutableListOf<android.net.Uri>()
+                                    fileScanner.scanPlaylistItemsFlow(
+                                        items = listOf(com.example.customgalleryviewer.data.PlaylistItemEntity(
+                                            playlistId = 0, uriString = folderUri.toString(),
+                                            type = com.example.customgalleryviewer.data.ItemType.FOLDER, isRecursive = false
+                                        )),
+                                        filter = com.example.customgalleryviewer.data.MediaFilterType.MIXED
+                                    ).collect { batch -> allFiles.addAll(batch) }
+                                    if (allFiles.isNotEmpty()) {
+                                        folderFileCache.saveFolderFiles(folder.bucketId, allFiles)
+                                    }
+                                }
                             }
                         } catch (_: Exception) {}
                     }

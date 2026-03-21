@@ -79,6 +79,7 @@ class DeviceFolderViewModel @Inject constructor(
         if (_files.value.isEmpty()) _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
             val folderPath = scanner.getFolderPath(bucketId)
+            Log.w("DeviceFolderVM", "loadFolder bucketId=$bucketId folderPath=$folderPath")
             val scanPath = folderPath ?: run {
                 // Fallback: try to get path from MediaStore files
                 val contentFiles = scanner.getFilesInFolder(bucketId)
@@ -119,6 +120,7 @@ class DeviceFolderViewModel @Inject constructor(
                     _isLoading.value = false
                 }
                 playbackList = allFiles
+                Log.w("DeviceFolderVM", "scan complete: ${allFiles.size} files, first=${allFiles.firstOrNull()}")
                 folderFileCache.saveFolderFiles(bucketId, allFiles)
             }
             _isLoading.value = false
