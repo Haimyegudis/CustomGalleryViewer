@@ -139,6 +139,12 @@ class PlayerViewModel @Inject constructor(
     private val _playlistFolders = MutableStateFlow<List<Pair<Uri, String>>>(emptyList())
     val playlistFolders: StateFlow<List<Pair<Uri, String>>> = _playlistFolders.asStateFlow()
 
+    fun forceReload(playlistId: Long) {
+        loadedPlaylistId = null
+        originalRawSet.clear()
+        loadPlaylist(playlistId)
+    }
+
     fun loadPlaylist(playlistId: Long) {
         if (loadedPlaylistId == playlistId && originalRawSet.isNotEmpty()) {
             Log.d("PlayerViewModel", "Playlist already loaded")

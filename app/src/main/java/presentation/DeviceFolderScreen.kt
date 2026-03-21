@@ -113,6 +113,7 @@ fun DeviceFolderScreen(
                     try { uri.path?.let { java.io.File(it).delete() } } catch (_: Exception) {}
                     viewModel.loadFolder(bucketId, force = true)
                 },
+                onRefresh = { viewModel.loadFolder(bucketId, force = true) },
                 initialScrollIndex = scrollIndex.intValue,
                 initialScrollOffset = scrollOffset.intValue,
                 onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }

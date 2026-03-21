@@ -184,6 +184,10 @@ fun PlayerScreen(
                     onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) },
                     onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                     onDeleteItem = { uri -> viewModel.removeFromList(uri) },
+                    onRefresh = {
+                        // Force reload by clearing loaded state
+                        viewModel.forceReload(playlistId)
+                    },
                     initialScrollIndex = scrollIndex.intValue,
                     initialScrollOffset = scrollOffset.intValue,
                     onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }
@@ -229,6 +233,7 @@ fun GalleryGridView(
     onBrowseFolder: (Uri, String) -> Unit = { _, _ -> },
     onToggleFavorite: (Uri) -> Unit = {},
     onDeleteItem: (Uri) -> Unit = {},
+    onRefresh: () -> Unit = {},
     initialScrollIndex: Int = 0,
     initialScrollOffset: Int = 0,
     onScrollChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -917,6 +922,7 @@ fun GalleryGridView(
                             var multiSelectOp by remember { mutableStateOf<com.example.customgalleryviewer.presentation.components.FileOperation?>(null) }
 
                             if (multiSelectOp != null) {
+                                val isMoveMulti = multiSelectOp == com.example.customgalleryviewer.presentation.components.FileOperation.MOVE
                                 com.example.customgalleryviewer.presentation.components.MultiFolderPickerDialog(
                                     uris = selectedItems.toList(),
                                     operation = multiSelectOp!!,
@@ -925,6 +931,7 @@ fun GalleryGridView(
                                         multiSelectOp = null
                                         selectedItems = emptySet()
                                         isSelectionMode = false
+                                        if (isMoveMulti) onRefresh()
                                     }
                                 )
                             }
@@ -1127,11 +1134,15 @@ fun GalleryGridView(
 
         // Folder picker for copy/move
         if (folderPickerUri != null && folderPickerOp != null) {
+            val isMoveOp = folderPickerOp == com.example.customgalleryviewer.presentation.components.FileOperation.MOVE
             com.example.customgalleryviewer.presentation.components.FolderPickerDialog(
                 uri = folderPickerUri!!,
                 operation = folderPickerOp!!,
                 onDismiss = { folderPickerUri = null; folderPickerOp = null },
-                onComplete = { folderPickerUri = null; folderPickerOp = null }
+                onComplete = {
+                    folderPickerUri = null; folderPickerOp = null
+                    if (isMoveOp) onRefresh()
+                }
             )
         }
 
