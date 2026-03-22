@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.customgalleryviewer.data.CachedFolder
 import com.example.customgalleryviewer.data.MediaCacheManager
+import com.example.customgalleryviewer.data.GestureAction
+import com.example.customgalleryviewer.data.GestureType
 import com.example.customgalleryviewer.data.SettingsManager
 import com.example.customgalleryviewer.data.SortOrder
 import com.example.customgalleryviewer.repository.MediaRepository
@@ -88,4 +90,26 @@ class SettingsViewModel @Inject constructor(
     fun setFolderGridColumns(cols: Int) = settingsManager.setFolderGridColumns(cols)
     fun getMediaFilter(): String = settingsManager.getMediaFilter()
     fun setMediaFilter(filter: String) = settingsManager.setMediaFilter(filter)
+
+    // Theme
+    private val _themeMode = MutableStateFlow(settingsManager.getThemeMode())
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
+    fun setThemeMode(mode: String) {
+        settingsManager.setThemeMode(mode)
+        _themeMode.value = mode
+    }
+
+    // Accent Color
+    private val _accentColor = MutableStateFlow(settingsManager.getAccentColor())
+    val accentColor: StateFlow<String> = _accentColor.asStateFlow()
+
+    fun setAccentColor(color: String) {
+        settingsManager.setAccentColor(color)
+        _accentColor.value = color
+    }
+
+    // Gestures
+    fun getGestureSettings(): Map<GestureType, GestureAction> = settingsManager.getAllGestureSettings()
+    fun setGestureAction(type: GestureType, action: GestureAction) = settingsManager.setGestureAction(type, action)
 }

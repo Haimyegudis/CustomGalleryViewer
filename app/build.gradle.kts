@@ -101,6 +101,18 @@ dependencies {
     implementation("androidx.mediarouter:mediarouter:1.7.0")
     implementation("com.google.android.gms:play-services-cast-framework:21.4.0")
 
+    // Biometric
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    // OSMDroid (Map)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+
+    // Media3 Transformer
+    implementation("androidx.media3:media3-transformer:$media3Version")
+
+    // ExifInterface
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // GSON
     implementation("com.google.code.gson:gson:2.10.1")
 

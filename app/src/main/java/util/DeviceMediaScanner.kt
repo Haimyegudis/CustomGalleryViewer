@@ -1,9 +1,11 @@
 package com.example.customgalleryviewer.util
 
+import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
+import com.example.customgalleryviewer.data.SearchFilters
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -584,6 +586,105 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
                 }
             }
         } catch (_: Exception) {}
+    }
+
+    fun searchMedia(filters: SearchFilters): List<Uri> {
+        val results = mutableListOf<Uri>()
+        if (filters.query.isBlank() && !filters.hasActiveFilters) return results
+
+        searchMediaStore(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, filters, results)
+        searchMediaStore(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, filters, results)
+
+        return results
+    }
+
+    private fun searchMediaStore(contentUri: Uri, filters: SearchFilters, results: MutableList<Uri>) {
+        try {
+            val selection = StringBuilder()
+            val selectionArgs = mutableListOf<String>()
+
+            if (filters.query.isNotBlank()) {
+                selection.append("${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?")
+                selectionArgs.add("%${filters.query}%")
+            }
+
+            if (filters.dateFrom != null) {
+                if (selection.isNotEmpty()) selection.append(" AND ")
+                selection.append("${MediaStore.MediaColumns.DATE_ADDED} >= ?")
+                selectionArgs.add((filters.dateFrom / 1000).toString())
+            }
+            if (filters.dateTo != null) {
+                if (selection.isNotEmpty()) selection.append(" AND ")
+                selection.append("${MediaStore.MediaColumns.DATE_ADDED} <= ?")
+                selectionArgs.add((filters.dateTo / 1000).toString())
+            }
+
+            if (filters.minSize != null) {
+                if (selection.isNotEmpty()) selection.append(" AND ")
+                selection.append("${MediaStore.MediaColumns.SIZE} >= ?")
+                selectionArgs.add(filters.minSize.toString())
+            }
+            if (filters.maxSize != null) {
+                if (selection.isNotEmpty()) selection.append(" AND ")
+                selection.append("${MediaStore.MediaColumns.SIZE} <= ?")
+                selectionArgs.add(filters.maxSize.toString())
+            }
+
+            context.contentResolver.query(
+                contentUri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                selection.toString().ifEmpty { null },
+                if (selectionArgs.isNotEmpty()) selectionArgs.toTypedArray() else null,
+                "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idIdx)
+                    results.add(ContentUris.withAppendedId(contentUri, id))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun getRecentlyAddedMedia(limit: Int = 20): List<Uri> {
+        val results = mutableListOf<Uri>()
+
+        // Images
+        try {
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID),
+                null, null,
+                "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndex(MediaStore.Images.Media._ID)
+                var count = 0
+                while (cursor.moveToNext() && count < limit) {
+                    results.add(ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cursor.getLong(idIdx)))
+                    count++
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Videos
+        try {
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Video.Media._ID),
+                null, null,
+                "${MediaStore.Video.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndex(MediaStore.Video.Media._ID)
+                var count = 0
+                while (cursor.moveToNext() && count < limit) {
+                    results.add(ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor.getLong(idIdx)))
+                    count++
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Sort by date_added desc and limit
+        return results.take(limit)
     }
 
     private data class MutableMediaFolder(

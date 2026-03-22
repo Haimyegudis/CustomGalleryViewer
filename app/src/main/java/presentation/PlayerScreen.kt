@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items as lazyListItems
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.drawWithContent
@@ -291,8 +290,6 @@ fun GalleryGridView(
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .collect { (idx, off) -> onScrollChanged(idx, off) }
     }
-    val listState = rememberLazyListState()
-
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -633,7 +630,6 @@ fun GalleryGridView(
             if (viewMode == "list") {
                 // List view
                 LazyColumn(
-                    state = listState,
                     modifier = Modifier.fillMaxSize().weight(1f),
                     contentPadding = PaddingValues(2.dp)
                 ) {

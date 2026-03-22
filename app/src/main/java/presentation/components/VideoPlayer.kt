@@ -86,6 +86,15 @@ fun VideoPlayer(
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("gallery_settings", android.content.Context.MODE_PRIVATE) }
 
+    // Gesture configuration
+    val gestureDoubleTapLeft = remember { prefs.getString("gesture_DOUBLE_TAP_LEFT", "PREVIOUS") ?: "PREVIOUS" }
+    val gestureDoubleTapRight = remember { prefs.getString("gesture_DOUBLE_TAP_RIGHT", "NEXT") ?: "NEXT" }
+    val gestureDoubleTapCenter = remember { prefs.getString("gesture_DOUBLE_TAP_CENTER", "TOGGLE_CONTROLS") ?: "TOGGLE_CONTROLS" }
+    val gestureLongPress = remember { prefs.getString("gesture_LONG_PRESS", "ACTION_MENU") ?: "ACTION_MENU" }
+    val gestureSwipeHoriz = remember { prefs.getString("gesture_SWIPE_HORIZONTAL", "SEEK") ?: "SEEK" }
+    val gestureSwipeLeftVert = remember { prefs.getString("gesture_SWIPE_LEFT_VERTICAL", "BRIGHTNESS") ?: "BRIGHTNESS" }
+    val gestureSwipeRightVert = remember { prefs.getString("gesture_SWIPE_RIGHT_VERTICAL", "VOLUME") ?: "VOLUME" }
+
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(false) }
     var showActionMenu by remember { mutableStateOf(false) }
@@ -93,6 +102,8 @@ fun VideoPlayer(
     var showCastDialog by remember { mutableStateOf(false) }
     var isDiscovering by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
+    var showAudioTrackDialog by remember { mutableStateOf(false) }
+    var audioTrackCount by remember { mutableIntStateOf(0) }
 
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -182,6 +193,12 @@ fun VideoPlayer(
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
         exoPlayer.volume = if (isMuted) 0f else 1f
+    }
+
+    // Update audio track count periodically
+    LaunchedEffect(uri) {
+        delay(2000) // Wait for media to load
+        audioTrackCount = getAudioTrackCount(exoPlayer)
     }
 
     LaunchedEffect(isLooping) {
@@ -327,8 +344,13 @@ fun VideoPlayer(
                                     isDragging = false
                                     gestureHandled = true
                                 } else if (elapsed > 400 && !dragStarted) {
-                                    // Long press
-                                    showActionMenu = true
+                                    // Long press - configurable action
+                                    when (gestureLongPress) {
+                                        "ACTION_MENU" -> showActionMenu = true
+                                        "TOGGLE_CONTROLS" -> isControlsVisible = !isControlsVisible
+                                        "PREVIOUS" -> { manualNavTime = System.currentTimeMillis(); onPrev() }
+                                        "NEXT" -> { manualNavTime = System.currentTimeMillis(); onNext() }
+                                    }
                                     gestureHandled = true
                                 }
 
@@ -345,18 +367,18 @@ fun VideoPlayer(
                                             if (ev.changes.firstOrNull()?.changedToUp() == true) break
                                         }
                                         val width = size.width
+                                        fun executeGestureAction(action: String) {
+                                            when (action) {
+                                                "PREVIOUS" -> { manualNavTime = System.currentTimeMillis(); onPrev() }
+                                                "NEXT" -> { manualNavTime = System.currentTimeMillis(); onNext() }
+                                                "TOGGLE_CONTROLS" -> isControlsVisible = !isControlsVisible
+                                                "ACTION_MENU" -> showActionMenu = true
+                                            }
+                                        }
                                         when {
-                                            downPos.x < width * 0.3 -> {
-                                                manualNavTime = System.currentTimeMillis()
-                                                Log.d("VideoPlayer", "Double-tap prev")
-                                                onPrev()
-                                            }
-                                            downPos.x > width * 0.7 -> {
-                                                manualNavTime = System.currentTimeMillis()
-                                                Log.d("VideoPlayer", "Double-tap next")
-                                                onNext()
-                                            }
-                                            else -> isControlsVisible = !isControlsVisible
+                                            downPos.x < width * 0.3 -> executeGestureAction(gestureDoubleTapLeft)
+                                            downPos.x > width * 0.7 -> executeGestureAction(gestureDoubleTapRight)
+                                            else -> executeGestureAction(gestureDoubleTapCenter)
                                         }
                                     } else {
                                         // Single tap
@@ -395,12 +417,16 @@ fun VideoPlayer(
                                     if (totalAbsY > 10) {
                                         isSeekMode = false
                                         val isRightSide = change.position.x > size.width / 2
-                                        if (isRightSide) {
-                                            showBrightnessIndicator = true
-                                            currentBrightnessLevel = startBrightness
-                                        } else {
-                                            showVolumeIndicator = true
-                                            currentVolumeLevel = startVolume
+                                        val vertAction = if (isRightSide) gestureSwipeRightVert else gestureSwipeLeftVert
+                                        when (vertAction) {
+                                            "BRIGHTNESS" -> {
+                                                showBrightnessIndicator = true
+                                                currentBrightnessLevel = startBrightness
+                                            }
+                                            "VOLUME" -> {
+                                                showVolumeIndicator = true
+                                                currentVolumeLevel = startVolume
+                                            }
                                         }
                                     }
                                 }
@@ -597,7 +623,7 @@ fun VideoPlayer(
                                 ) {
                                     Text(
                                         "${playbackSpeed}x",
-                                        color = if (playbackSpeed != 1f) Color(0xFF00E5FF) else Color.White.copy(0.7f),
+                                        color = if (playbackSpeed != 1f) MaterialTheme.colorScheme.primary else Color.White.copy(0.7f),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -612,7 +638,7 @@ fun VideoPlayer(
                                                 Text(
                                                     "${speed}x",
                                                     fontWeight = if (speed == playbackSpeed) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (speed == playbackSpeed) Color(0xFF00E5FF) else Color.Unspecified
+                                                    color = if (speed == playbackSpeed) MaterialTheme.colorScheme.primary else Color.Unspecified
                                                 )
                                             },
                                             onClick = {
@@ -621,6 +647,20 @@ fun VideoPlayer(
                                             }
                                         )
                                     }
+                                }
+                            }
+                            // Audio track button (only when multiple tracks)
+                            if (audioTrackCount > 1) {
+                                IconButton(
+                                    onClick = { showAudioTrackDialog = true },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.MusicNote,
+                                        "Audio Tracks",
+                                        tint = Color.White.copy(0.7f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
                         }
@@ -632,11 +672,11 @@ fun VideoPlayer(
                     val isCasting by castManager.isCasting.collectAsState()
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = if (isCasting) Color(0xFF00E5FF).copy(0.2f) else Color.Black.copy(0.4f),
+                        color = if (isCasting) MaterialTheme.colorScheme.primary.copy(0.2f) else Color.Black.copy(0.4f),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .statusBarsPadding()
-                            .padding(top = 56.dp, end = 12.dp)
+                            .padding(top = 64.dp, end = 12.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -659,12 +699,12 @@ fun VideoPlayer(
                             Icon(
                                 if (isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
                                 "Cast",
-                                tint = if (isCasting) Color(0xFF00E5FF) else Color.White,
+                                tint = if (isCasting) MaterialTheme.colorScheme.primary else Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                             Text(
                                 if (isCasting) "Casting" else "Cast",
-                                color = if (isCasting) Color(0xFF00E5FF) else Color.White.copy(0.8f),
+                                color = if (isCasting) MaterialTheme.colorScheme.primary else Color.White.copy(0.8f),
                                 fontSize = 12.sp
                             )
                         }
@@ -970,6 +1010,13 @@ fun VideoPlayer(
             )
         }
 
+        if (showAudioTrackDialog) {
+            AudioTrackDialog(
+                player = exoPlayer,
+                onDismiss = { showAudioTrackDialog = false }
+            )
+        }
+
         // Cast device picker dialog
         if (showCastDialog && castManager != null) {
             val castDevices by castManager.devices.collectAsState()
@@ -1058,7 +1105,7 @@ private fun ControlIconButton(
     ) {
         Icon(
             icon, label,
-            tint = if (isActive) Color(0xFF00E5FF) else Color.White.copy(0.5f),
+            tint = if (isActive) MaterialTheme.colorScheme.primary else Color.White.copy(0.5f),
             modifier = Modifier.size(20.dp)
         )
     }
@@ -1088,6 +1135,8 @@ fun ActionMenuDialog(
     val mediaInfo = remember { getMediaInfo(context, uri) }
     var folderPickerOp by remember { mutableStateOf<FileOperation?>(null) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showTrimDialog by remember { mutableStateOf(false) }
+    var showCompressDialog by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1113,6 +1162,18 @@ fun ActionMenuDialog(
                         Spacer(Modifier.width(8.dp))
                         Text("Edit")
                     }
+                }
+                if (isVideo) {
+                    TextButton(onClick = { showTrimDialog = true; onDismiss() }) {
+                        Icon(Icons.Default.ContentCut, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Trim")
+                    }
+                }
+                TextButton(onClick = { showCompressDialog = true; onDismiss() }) {
+                    Icon(Icons.Default.Compress, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compress")
                 }
                 TextButton(onClick = { shareMedia(context, uri, isVideo); onDismiss() }) {
                     Icon(Icons.Default.Share, null)
@@ -1149,6 +1210,36 @@ fun ActionMenuDialog(
         confirmButton = {},
         shape = RoundedCornerShape(20.dp)
     )
+
+    if (showTrimDialog) {
+        // Get video duration for trimmer
+        val videoDuration = remember {
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                if (uri.scheme == "file") {
+                    retriever.setDataSource(uri.path)
+                } else {
+                    retriever.setDataSource(context, uri)
+                }
+                val dur = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                retriever.release()
+                dur
+            } catch (_: Exception) { 60000L }
+        }
+        VideoTrimmerDialog(
+            uri = uri,
+            durationMs = videoDuration,
+            onDismiss = { showTrimDialog = false }
+        )
+    }
+
+    if (showCompressDialog) {
+        CompressDialog(
+            uri = uri,
+            isVideo = isVideo,
+            onDismiss = { showCompressDialog = false }
+        )
+    }
 
     if (folderPickerOp != null) {
         val currentOp = folderPickerOp!!

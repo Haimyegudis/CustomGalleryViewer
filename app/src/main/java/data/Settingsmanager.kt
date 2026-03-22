@@ -2,6 +2,8 @@ package com.example.customgalleryviewer.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.customgalleryviewer.data.GestureAction
+import com.example.customgalleryviewer.data.GestureType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,8 +32,10 @@ class SettingsManager @Inject constructor(
         private const val KEY_FOLDER_GRID_COLUMNS = "folder_grid_columns"
         private const val KEY_LOCAL_SORT = "local_sort_order"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_ACCENT_COLOR = "accent_color"
         private const val KEY_SLIDESHOW_INTERVAL = "slideshow_interval"
         private const val KEY_LOOP_ONE = "loop_one"
+        private const val KEY_GESTURE_PREFIX = "gesture_"
     }
 
     // --- Playback Sort (Random / Name / Date) ---
@@ -115,4 +119,54 @@ class SettingsManager @Inject constructor(
 
     fun setLoopOne(on: Boolean) { prefs.edit().putBoolean(KEY_LOOP_ONE, on).apply() }
     fun getLoopOne(): Boolean = prefs.getBoolean(KEY_LOOP_ONE, false)
+
+    // --- Theme Mode ---
+    private val _themeModeFlow = MutableStateFlow(getThemeMode())
+    val themeModeFlow: StateFlow<String> = _themeModeFlow.asStateFlow()
+
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString(KEY_THEME_MODE, mode).apply()
+        _themeModeFlow.value = mode
+    }
+
+    fun getThemeMode(): String = prefs.getString(KEY_THEME_MODE, "dark") ?: "dark"
+
+    // --- Accent Color ---
+    private val _accentColorFlow = MutableStateFlow(getAccentColor())
+    val accentColorFlow: StateFlow<String> = _accentColorFlow.asStateFlow()
+
+    fun setAccentColor(color: String) {
+        prefs.edit().putString(KEY_ACCENT_COLOR, color).apply()
+        _accentColorFlow.value = color
+    }
+
+    fun getAccentColor(): String = prefs.getString(KEY_ACCENT_COLOR, "cyan") ?: "cyan"
+
+    // --- Gesture Settings ---
+    private val defaultGestures = mapOf(
+        GestureType.DOUBLE_TAP_LEFT to GestureAction.PREVIOUS,
+        GestureType.DOUBLE_TAP_RIGHT to GestureAction.NEXT,
+        GestureType.DOUBLE_TAP_CENTER to GestureAction.TOGGLE_CONTROLS,
+        GestureType.SWIPE_LEFT_VERTICAL to GestureAction.BRIGHTNESS,
+        GestureType.SWIPE_RIGHT_VERTICAL to GestureAction.VOLUME,
+        GestureType.SWIPE_HORIZONTAL to GestureAction.SEEK,
+        GestureType.LONG_PRESS to GestureAction.ACTION_MENU
+    )
+
+    fun getGestureAction(gestureType: GestureType): GestureAction {
+        val saved = prefs.getString(KEY_GESTURE_PREFIX + gestureType.name, null)
+        return if (saved != null) {
+            try { GestureAction.valueOf(saved) } catch (_: Exception) { defaultGestures[gestureType] ?: GestureAction.NONE }
+        } else {
+            defaultGestures[gestureType] ?: GestureAction.NONE
+        }
+    }
+
+    fun setGestureAction(gestureType: GestureType, action: GestureAction) {
+        prefs.edit().putString(KEY_GESTURE_PREFIX + gestureType.name, action.name).apply()
+    }
+
+    fun getAllGestureSettings(): Map<GestureType, GestureAction> {
+        return GestureType.entries.associateWith { getGestureAction(it) }
+    }
 }

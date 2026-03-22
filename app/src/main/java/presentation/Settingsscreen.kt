@@ -1,9 +1,11 @@
 package com.example.customgalleryviewer.presentation
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,13 +15,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.customgalleryviewer.data.GestureAction
+import com.example.customgalleryviewer.data.GestureType
 import com.example.customgalleryviewer.data.SortOrder
+import com.nowwhat.customgalleryviewer.ui.theme.accentColorOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +38,8 @@ fun SettingsScreen(
     val currentNavMode by viewModel.navigationMode.collectAsState()
     val cacheInfo by viewModel.cacheInfo.collectAsState()
     val showHidden by viewModel.showHidden.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
+    val accentColor by viewModel.accentColor.collectAsState()
 
     var showClearCacheDialog by remember { mutableStateOf(false) }
 
@@ -235,6 +243,134 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Theme
+            SectionHeader("APPEARANCE")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                SelectableRow(
+                    title = "Dark",
+                    subtitle = "Dark theme",
+                    isSelected = themeMode == "dark",
+                    onClick = { viewModel.setThemeMode("dark") }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "Light",
+                    subtitle = "Light theme",
+                    isSelected = themeMode == "light",
+                    onClick = { viewModel.setThemeMode("light") }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "AMOLED",
+                    subtitle = "Pure black background",
+                    isSelected = themeMode == "amoled",
+                    onClick = { viewModel.setThemeMode("amoled") }
+                )
+                InsetDivider()
+                SelectableRow(
+                    title = "System",
+                    subtitle = "Follow system setting",
+                    isSelected = themeMode == "system",
+                    onClick = { viewModel.setThemeMode("system") }
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Accent Color
+            SectionHeader("ACCENT COLOR")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    accentColorOptions.forEach { (name, color) ->
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .then(
+                                    if (accentColor == name) Modifier.border(3.dp, Color.White, CircleShape)
+                                    else Modifier
+                                )
+                                .clickable { viewModel.setAccentColor(name) }
+                        ) {
+                            if (accentColor == name) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    null,
+                                    tint = Color.White,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .align(Alignment.Center)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Gesture Customization
+            SectionHeader("GESTURES")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                val gestureSettings = remember { viewModel.getGestureSettings() }
+                var gestureMap by remember { mutableStateOf(gestureSettings) }
+                var expandedGesture by remember { mutableStateOf<GestureType?>(null) }
+
+                gestureMap.forEach { (gestureType, currentAction) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expandedGesture = gestureType }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            gestureType.name.replace("_", " ").lowercase()
+                                .replaceFirstChar { it.uppercase() },
+                            fontSize = 14.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box {
+                            Text(
+                                currentAction.label,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            DropdownMenu(
+                                expanded = expandedGesture == gestureType,
+                                onDismissRequest = { expandedGesture = null }
+                            ) {
+                                GestureAction.entries.forEach { action ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                action.label,
+                                                fontWeight = if (action == currentAction) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        onClick = {
+                                            viewModel.setGestureAction(gestureType, action)
+                                            gestureMap = gestureMap.toMutableMap().apply { put(gestureType, action) }
+                                            expandedGesture = null
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    InsetDivider()
                 }
             }
 

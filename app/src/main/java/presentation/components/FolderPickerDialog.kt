@@ -273,7 +273,7 @@ fun FolderPickerDialog(
                         },
                         enabled = !isProcessing
                     ) {
-                        Text("${title} here")
+                        Text(if (operation == FileOperation.COPY) "Copy here" else "Move here")
                     }
                 }
             }

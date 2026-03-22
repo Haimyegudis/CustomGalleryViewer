@@ -49,12 +49,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import com.example.customgalleryviewer.data.SettingsManager
 import com.example.customgalleryviewer.presentation.AddPlaylistScreen
 import com.example.customgalleryviewer.presentation.DeviceFolderScreen
+import com.example.customgalleryviewer.presentation.DuplicateFinderScreen
 import com.example.customgalleryviewer.presentation.EditPlaylistScreen
 import com.example.customgalleryviewer.presentation.HomeScreen
+import com.example.customgalleryviewer.presentation.MapScreen
 import com.example.customgalleryviewer.presentation.PlayerScreen
 import com.example.customgalleryviewer.presentation.SettingsScreen
+import com.example.customgalleryviewer.presentation.VaultScreen
 import com.nowwhat.customgalleryviewer.ui.theme.CustomGalleryViewerTheme
 import com.example.customgalleryviewer.logic.PipState
 import dagger.hilt.android.AndroidEntryPoint
@@ -64,6 +69,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var pipState: PipState
+    @Inject lateinit var settingsManager: SettingsManager
 
     private var isInPipMode = false
 
@@ -100,7 +106,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CustomGalleryViewerTheme {
+            val themeMode by settingsManager.themeModeFlow.collectAsState()
+            val accentColor by settingsManager.accentColorFlow.collectAsState()
+            CustomGalleryViewerTheme(themeMode = themeMode, accentColor = accentColor) {
                 var showSplash by remember { mutableStateOf(true) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -157,7 +165,10 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToAdd = { navController.navigate("add_playlist") },
                                 onNavigateToSettings = { navController.navigate("settings") },
                                 onNavigateToEdit = { id -> navController.navigate("edit_playlist/$id") },
-                                onNavigateToDeviceFolder = { bucketId -> navController.navigate("device_folder/$bucketId") }
+                                onNavigateToDeviceFolder = { bucketId -> navController.navigate("device_folder/$bucketId") },
+                                onNavigateToDuplicates = { navController.navigate("duplicates") },
+                                onNavigateToVault = { navController.navigate("vault") },
+                                onNavigateToMap = { navController.navigate("map") }
                             )
                         }
 
@@ -202,6 +213,24 @@ class MainActivity : ComponentActivity() {
                             val bucketId = backStackEntry.arguments?.getLong("bucketId") ?: 0L
                             DeviceFolderScreen(
                                 bucketId = bucketId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable("duplicates") {
+                            DuplicateFinderScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable("vault") {
+                            VaultScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable("map") {
+                            MapScreen(
                                 onBack = { navController.popBackStack() }
                             )
                         }

@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.customgalleryviewer.data.AppDatabase
 import com.example.customgalleryviewer.data.FavoriteDao
 import com.example.customgalleryviewer.data.PlaylistDao
+import com.example.customgalleryviewer.data.VaultDao
 import com.example.customgalleryviewer.data.WatchPositionDao
 import dagger.Module
 import dagger.Provides
@@ -34,7 +35,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "gallery_db"
         )
-            .addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -52,5 +53,10 @@ object DatabaseModule {
     @Provides
     fun provideFavoriteDao(database: AppDatabase): FavoriteDao {
         return database.favoriteDao()
+    }
+
+    @Provides
+    fun provideVaultDao(database: AppDatabase): VaultDao {
+        return database.vaultDao()
     }
 }

@@ -1,6 +1,7 @@
 package com.example.customgalleryviewer.presentation
 
 import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -10,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -53,6 +55,9 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToEdit: (Long) -> Unit,
     onNavigateToDeviceFolder: (Long) -> Unit = {},
+    onNavigateToDuplicates: () -> Unit = {},
+    onNavigateToVault: () -> Unit = {},
+    onNavigateToMap: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val playlists by viewModel.playlists.collectAsState()
@@ -60,7 +65,12 @@ fun HomeScreen(
     val isScanning by viewModel.isScanning.collectAsState()
     val showHidden by viewModel.showHidden.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val recentlyWatched by viewModel.recentlyWatched.collectAsState()
+    val recentlyAdded by viewModel.recentlyAdded.collectAsState()
     val context = LocalContext.current
+    var showSearchBar by remember { mutableStateOf(false) }
 
     // Double-back-to-exit
     var backPressedOnce by remember { mutableStateOf(false) }
@@ -113,7 +123,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .padding(top = 60.dp, bottom = 8.dp)
+                    .padding(top = 16.dp, bottom = 8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -126,7 +136,33 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Search toggle
+                        IconButton(
+                            onClick = { showSearchBar = !showSearchBar },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Search, "Search",
+                                tint = if (showSearchBar) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        // Map
+                        IconButton(
+                            onClick = onNavigateToMap,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(Icons.Default.Map, "Map", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
+                        // Vault
+                        IconButton(
+                            onClick = onNavigateToVault,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, "Vault", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
                         // View mode toggle
                         IconButton(
                             onClick = {
@@ -137,12 +173,7 @@ fun HomeScreen(
                                 }
                                 settingsViewModel.setHomeViewMode(homeViewMode)
                             },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceVariant,
-                                    CircleShape
-                                )
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(
                                 when (homeViewMode) {
@@ -157,19 +188,9 @@ fun HomeScreen(
                         }
                         IconButton(
                             onClick = onNavigateToSettings,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceVariant,
-                                    CircleShape
-                                )
+                            modifier = Modifier.size(44.dp)
                         ) {
-                            Icon(
-                                Icons.Default.Settings,
-                                "Settings",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -189,6 +210,160 @@ fun HomeScreen(
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
+            }
+
+            // Search bar
+            if (showSearchBar) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { viewModel.setSearchQuery(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                    placeholder = { Text("Search all files...", color = MaterialTheme.colorScheme.onSurface.copy(0.3f)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                Icon(Icons.Default.Clear, "Clear", tint = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                            }
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                if (searchResults.isNotEmpty()) {
+                    Text(
+                        "${searchResults.size} results",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.height(80.dp)
+                    ) {
+                        items(searchResults.take(20)) { uri ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(uri)
+                                    .decoderFactory(coil.decode.VideoFrameDecoder.Factory())
+                                    .crossfade(true).size(128).build(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(70.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        val mimeType = context.contentResolver.getType(uri) ?: "image/*"
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(uri, mimeType)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        try { context.startActivity(intent) } catch (_: Exception) {}
+                                    },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Recently Watched row
+            if (recentlyWatched.isNotEmpty() && !showSearchBar) {
+                Text(
+                    "Recently Watched",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp)
+                )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.height(70.dp)
+                ) {
+                    items(recentlyWatched) { uri ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(uri)
+                                .decoderFactory(coil.decode.VideoFrameDecoder.Factory())
+                                .crossfade(true).size(128).build(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val mimeType = context.contentResolver.getType(uri) ?: "video/*"
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(uri, mimeType)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    try { context.startActivity(intent) } catch (_: Exception) {}
+                                },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+
+            // Recently Added row
+            if (recentlyAdded.isNotEmpty() && !showSearchBar) {
+                Text(
+                    "Recently Added",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp)
+                )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.height(70.dp)
+                ) {
+                    items(recentlyAdded) { uri ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(uri)
+                                .decoderFactory(coil.decode.VideoFrameDecoder.Factory())
+                                .crossfade(true).size(128).build(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val mimeType = context.contentResolver.getType(uri) ?: "image/*"
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(uri, mimeType)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    try { context.startActivity(intent) } catch (_: Exception) {}
+                                },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+
+            // Quick actions row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AssistChip(
+                    onClick = onNavigateToDuplicates,
+                    label = { Text("Duplicates", fontSize = 12.sp) },
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp)) }
+                )
             }
 
             // Tab selector

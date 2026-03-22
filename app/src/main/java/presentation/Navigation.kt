@@ -26,6 +26,15 @@ fun NavigationGraph(navController: NavHostController) {
                 },
                 onNavigateToDeviceFolder = { bucketId ->
                     navController.navigate("device_folder/$bucketId")
+                },
+                onNavigateToDuplicates = {
+                    navController.navigate("duplicates")
+                },
+                onNavigateToVault = {
+                    navController.navigate("vault")
+                },
+                onNavigateToMap = {
+                    navController.navigate("map")
                 }
             )
         }
@@ -71,6 +80,24 @@ fun NavigationGraph(navController: NavHostController) {
 
         composable("add_playlist") {
             AddPlaylistScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("duplicates") {
+            DuplicateFinderScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("vault") {
+            VaultScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("map") {
+            MapScreen(
                 onBack = { navController.popBackStack() }
             )
         }

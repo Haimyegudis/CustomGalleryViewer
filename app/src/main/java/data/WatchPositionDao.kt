@@ -19,4 +19,7 @@ interface WatchPositionDao {
 
     @Query("SELECT * FROM watch_positions")
     fun getAllPositionsFlow(): Flow<List<WatchPositionEntity>>
+
+    @Query("SELECT * FROM watch_positions ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun getRecentlyWatched(limit: Int): List<WatchPositionEntity>
 }

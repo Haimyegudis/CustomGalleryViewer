@@ -277,7 +277,7 @@ fun MediaEditorDialog(
                         if (isSaving) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                         } else {
-                            Text("Save", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                            Text("Save", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -456,11 +456,11 @@ fun MediaEditorDialog(
 
                             // Clone source indicator
                             if (selectedTab == EditorTab.RETOUCH && retouchTool == RetouchTool.CLONE && cloneSource != null) {
-                                drawCircle(Color(0xFF00E5FF).copy(0.7f), radius = retouchRadius, center = cloneSource!!, style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
-                                // Crosshair
+                                val accentColor = Color(0xFF00E5FF)
+                                drawCircle(accentColor.copy(0.7f), radius = retouchRadius, center = cloneSource!!, style = androidx.compose.ui.graphics.drawscope.Stroke(2f))
                                 val cs = cloneSource!!
-                                drawLine(Color(0xFF00E5FF), Offset(cs.x - 12f, cs.y), Offset(cs.x + 12f, cs.y), strokeWidth = 1.5f)
-                                drawLine(Color(0xFF00E5FF), Offset(cs.x, cs.y - 12f), Offset(cs.x, cs.y + 12f), strokeWidth = 1.5f)
+                                drawLine(accentColor, Offset(cs.x - 12f, cs.y), Offset(cs.x + 12f, cs.y), strokeWidth = 1.5f)
+                                drawLine(accentColor, Offset(cs.x, cs.y - 12f), Offset(cs.x, cs.y + 12f), strokeWidth = 1.5f)
                             }
 
                             // Crop overlay
@@ -509,7 +509,7 @@ fun MediaEditorDialog(
                 ) {
                     EditorTab.entries.forEach { tab ->
                         val selected = selectedTab == tab
-                        val color by animateColorAsState(if (selected) Color(0xFF00E5FF) else Color.White.copy(0.5f))
+                        val color by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(0.5f))
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
@@ -588,7 +588,7 @@ fun MediaEditorDialog(
                                                     .clip(RoundedCornerShape(12.dp))
                                                     .border(
                                                         2.dp,
-                                                        if (isSelected) Color(0xFF00E5FF) else Color.Transparent,
+                                                        if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
                                                         RoundedCornerShape(12.dp)
                                                     )
                                             ) {
@@ -610,7 +610,7 @@ fun MediaEditorDialog(
                                             }
                                             Text(
                                                 preset.name, fontSize = 10.sp,
-                                                color = if (isSelected) Color(0xFF00E5FF) else Color.White.copy(0.6f),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(0.6f),
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                                 modifier = Modifier.padding(top = 4.dp)
                                             )
@@ -634,7 +634,7 @@ fun MediaEditorDialog(
                                                     .clip(CircleShape)
                                                     .background(color)
                                                     .then(
-                                                        if (isSelected) Modifier.border(2.dp, Color(0xFF00E5FF), CircleShape)
+                                                        if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
                                                         else Modifier.border(1.dp, Color.White.copy(0.3f), CircleShape)
                                                     )
                                                     .clickable { drawColor = color }
@@ -650,8 +650,8 @@ fun MediaEditorDialog(
                                             valueRange = 2f..30f,
                                             modifier = Modifier.weight(1f),
                                             colors = SliderDefaults.colors(
-                                                thumbColor = Color(0xFF00E5FF),
-                                                activeTrackColor = Color(0xFF00E5FF),
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
                                                 inactiveTrackColor = Color.White.copy(0.15f)
                                             )
                                         )
@@ -692,14 +692,14 @@ fun MediaEditorDialog(
                                     ) {
                                         RetouchTool.entries.forEach { tool ->
                                             val isSelected = retouchTool == tool
-                                            val tColor by animateColorAsState(if (isSelected) Color(0xFF00E5FF) else Color.White.copy(0.5f))
+                                            val tColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(0.5f))
                                             Surface(
                                                 onClick = {
                                                     retouchTool = tool
                                                     if (tool == RetouchTool.CLONE) isSettingCloneSource = true
                                                 },
                                                 shape = RoundedCornerShape(12.dp),
-                                                color = if (isSelected) Color(0xFF00E5FF).copy(0.15f) else Color.Transparent,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(0.15f) else Color.Transparent,
                                                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
                                             ) {
                                                 Column(
@@ -728,7 +728,7 @@ fun MediaEditorDialog(
                                     }
                                     // Clone source hint
                                     if (retouchTool == RetouchTool.CLONE && isSettingCloneSource) {
-                                        Text("Tap on the area to clone FROM", color = Color(0xFF00E5FF), fontSize = 12.sp,
+                                        Text("Tap on the area to clone FROM", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
                                             modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                     }
                                     // Brush size
@@ -740,8 +740,8 @@ fun MediaEditorDialog(
                                             valueRange = 8f..60f,
                                             modifier = Modifier.weight(1f),
                                             colors = SliderDefaults.colors(
-                                                thumbColor = Color(0xFF00E5FF),
-                                                activeTrackColor = Color(0xFF00E5FF),
+                                                thumbColor = MaterialTheme.colorScheme.primary,
+                                                activeTrackColor = MaterialTheme.colorScheme.primary,
                                                 inactiveTrackColor = Color.White.copy(0.15f)
                                             )
                                         )
@@ -764,9 +764,9 @@ fun MediaEditorDialog(
                                         if (retouchTool == RetouchTool.CLONE) {
                                             Spacer(Modifier.width(16.dp))
                                             TextButton(onClick = { isSettingCloneSource = true; cloneSource = null }) {
-                                                Icon(Icons.Default.MyLocation, null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Default.MyLocation, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                                 Spacer(Modifier.width(4.dp))
-                                                Text("New Source", color = Color(0xFF00E5FF), fontSize = 12.sp)
+                                                Text("New Source", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                                             }
                                         }
                                         Spacer(Modifier.width(16.dp))
@@ -850,8 +850,8 @@ private fun AdjustSlider(label: String, value: Float, min: Float, max: Float, on
             valueRange = min..max,
             modifier = Modifier.weight(1f),
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFF00E5FF),
-                activeTrackColor = Color(0xFF00E5FF),
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
                 inactiveTrackColor = Color.White.copy(0.15f)
             )
         )

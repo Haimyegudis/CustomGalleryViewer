@@ -7,7 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.customgalleryviewer.data.FolderFileCache
 import com.example.customgalleryviewer.data.PlaylistWithItems
+import com.example.customgalleryviewer.data.SearchFilters
 import com.example.customgalleryviewer.data.SettingsManager
+import com.example.customgalleryviewer.data.WatchPositionDao
 import com.example.customgalleryviewer.repository.MediaRepository
 import com.example.customgalleryviewer.util.DeviceMediaScanner
 import com.example.customgalleryviewer.util.MediaFolder
@@ -36,7 +38,8 @@ class HomeViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val scanner: DeviceMediaScanner,
     private val folderFileCache: FolderFileCache,
-    private val cacheManager: com.example.customgalleryviewer.data.MediaCacheManager
+    private val cacheManager: com.example.customgalleryviewer.data.MediaCacheManager,
+    private val watchPositionDao: WatchPositionDao
 ) : ViewModel() {
 
     val showHidden: StateFlow<Boolean> = settingsManager.showHiddenFlow
@@ -60,6 +63,33 @@ class HomeViewModel @Inject constructor(
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    // Search state
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<Uri>>(emptyList())
+    val searchResults: StateFlow<List<Uri>> = _searchResults.asStateFlow()
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val results = scanner.searchMedia(SearchFilters(query = query))
+            _searchResults.value = results
+        }
+    }
+
+    // Recently watched
+    private val _recentlyWatched = MutableStateFlow<List<Uri>>(emptyList())
+    val recentlyWatched: StateFlow<List<Uri>> = _recentlyWatched.asStateFlow()
+
+    // Recently added
+    private val _recentlyAdded = MutableStateFlow<List<Uri>>(emptyList())
+    val recentlyAdded: StateFlow<List<Uri>> = _recentlyAdded.asStateFlow()
 
     // Custom covers stored by bucketId
     private val _folderCovers = mutableStateMapOf<Long, Uri>()
@@ -98,6 +128,17 @@ class HomeViewModel @Inject constructor(
             if (bucketId != null && value == true) {
                 _favoriteFolders[bucketId] = true
             }
+        }
+
+        // Load recently watched and recently added
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val watched = watchPositionDao.getRecentlyWatched(10)
+                _recentlyWatched.value = watched.map { Uri.parse(it.uri) }
+            } catch (_: Exception) {}
+            try {
+                _recentlyAdded.value = scanner.getRecentlyAddedMedia(10)
+            } catch (_: Exception) {}
         }
 
         // Eagerly load device folders at startup (show cached instantly, refresh in background)
