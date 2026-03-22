@@ -26,15 +26,35 @@ class VaultManager @Inject constructor(
 
     suspend fun moveToVault(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         try {
-            val sourcePath = getPathFromUri(uri) ?: return@withContext false
-            val sourceFile = File(sourcePath)
-            if (!sourceFile.exists()) return@withContext false
+            val sourcePath = getPathFromUri(uri)
+            val sourceFile = if (sourcePath != null) File(sourcePath) else null
 
-            val fileName = sourceFile.name
+            // Determine filename
+            val fileName = sourceFile?.name ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file_${System.currentTimeMillis()}"
             val destFile = File(vaultDir, "${System.currentTimeMillis()}_$fileName")
 
-            sourceFile.copyTo(destFile, overwrite = true)
-            sourceFile.delete()
+            if (sourceFile != null && sourceFile.exists()) {
+                // File-based copy + delete
+                sourceFile.copyTo(destFile, overwrite = true)
+                sourceFile.delete()
+                // Also remove from MediaStore
+                try {
+                    context.contentResolver.delete(
+                        android.provider.MediaStore.Files.getContentUri("external"),
+                        "${android.provider.MediaStore.MediaColumns.DATA}=?",
+                        arrayOf(sourcePath)
+                    )
+                } catch (_: Exception) {}
+            } else {
+                // Content URI fallback — copy via InputStream
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    destFile.outputStream().use { output -> input.copyTo(output) }
+                } ?: return@withContext false
+                // Try to delete source via content resolver
+                try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+            }
+
+            if (!destFile.exists()) return@withContext false
 
             val isVideo = fileName.lowercase().let {
                 it.endsWith(".mp4") || it.endsWith(".mkv") || it.endsWith(".avi") ||
@@ -43,12 +63,13 @@ class VaultManager @Inject constructor(
 
             vaultDao.insert(
                 VaultEntity(
-                    originalPath = sourcePath,
+                    originalPath = sourcePath ?: uri.toString(),
                     vaultPath = destFile.absolutePath,
                     fileName = fileName,
                     isVideo = isVideo
                 )
             )
+            Log.i("VaultManager", "Moved to vault: $fileName -> ${destFile.absolutePath}")
             true
         } catch (e: Exception) {
             Log.e("VaultManager", "Error moving to vault", e)

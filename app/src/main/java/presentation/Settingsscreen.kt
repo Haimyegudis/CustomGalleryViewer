@@ -1,5 +1,6 @@
 package com.example.customgalleryviewer.presentation
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -312,6 +313,49 @@ fun SettingsScreen(
                                         .size(20.dp)
                                         .align(Alignment.Center)
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Background Wallpaper (Skin)
+            SectionHeader("BACKGROUND SKIN")
+            GroupedSection(modifier = Modifier.padding(horizontal = 20.dp)) {
+                val skinContext = LocalContext.current
+                val currentWallpaper = viewModel.getWallpaper()
+                val wallpaperLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                ) { uri ->
+                    if (uri != null) {
+                        // Take persistent permission
+                        try {
+                            skinContext.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        } catch (_: Exception) {}
+                        viewModel.setWallpaper(uri.toString())
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Background Image", fontWeight = FontWeight.Medium)
+                        Text(
+                            if (currentWallpaper != null) "Custom image set" else "None",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { wallpaperLauncher.launch("image/*") }) {
+                            Text("Choose", fontSize = 13.sp)
+                        }
+                        if (currentWallpaper != null) {
+                            TextButton(onClick = { viewModel.setWallpaper(null) }) {
+                                Text("Clear", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }

@@ -80,6 +80,7 @@ fun VideoPlayer(
     onDelete: (Uri) -> Unit = {},
     pipState: com.example.customgalleryviewer.logic.PipState? = null,
     castManager: com.example.customgalleryviewer.util.CastManager? = null,
+    onHideInVault: (Uri) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -92,8 +93,8 @@ fun VideoPlayer(
     val gestureDoubleTapCenter = remember { prefs.getString("gesture_DOUBLE_TAP_CENTER", "TOGGLE_CONTROLS") ?: "TOGGLE_CONTROLS" }
     val gestureLongPress = remember { prefs.getString("gesture_LONG_PRESS", "ACTION_MENU") ?: "ACTION_MENU" }
     val gestureSwipeHoriz = remember { prefs.getString("gesture_SWIPE_HORIZONTAL", "SEEK") ?: "SEEK" }
-    val gestureSwipeLeftVert = remember { prefs.getString("gesture_SWIPE_LEFT_VERTICAL", "BRIGHTNESS") ?: "BRIGHTNESS" }
-    val gestureSwipeRightVert = remember { prefs.getString("gesture_SWIPE_RIGHT_VERTICAL", "VOLUME") ?: "VOLUME" }
+    val gestureSwipeLeftVert = remember { prefs.getString("gesture_SWIPE_LEFT_VERTICAL", "VOLUME") ?: "VOLUME" }
+    val gestureSwipeRightVert = remember { prefs.getString("gesture_SWIPE_RIGHT_VERTICAL", "BRIGHTNESS") ?: "BRIGHTNESS" }
 
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(false) }
@@ -102,6 +103,8 @@ fun VideoPlayer(
     var showCastDialog by remember { mutableStateOf(false) }
     var isDiscovering by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
+    var showTrimDialog by remember { mutableStateOf(false) }
+    var showCompressDialog by remember { mutableStateOf(false) }
     var showAudioTrackDialog by remember { mutableStateOf(false) }
     var audioTrackCount by remember { mutableIntStateOf(0) }
 
@@ -718,11 +721,11 @@ fun VideoPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { onPrev() },
+                        onClick = { onNext() },
                         modifier = Modifier.size(52.dp)
                     ) {
                         Icon(
-                            Icons.Default.SkipPrevious, "Previous",
+                            Icons.Default.SkipNext, "Next",
                             tint = Color.White,
                             modifier = Modifier.size(36.dp)
                         )
@@ -748,11 +751,11 @@ fun VideoPlayer(
                     }
 
                     IconButton(
-                        onClick = { onNext() },
+                        onClick = { onPrev() },
                         modifier = Modifier.size(52.dp)
                     ) {
                         Icon(
-                            Icons.Default.SkipNext, "Next",
+                            Icons.Default.SkipPrevious, "Previous",
                             tint = Color.White,
                             modifier = Modifier.size(36.dp)
                         )
@@ -985,6 +988,34 @@ fun VideoPlayer(
             }
         }
 
+        // Video trimmer
+        if (showTrimDialog) {
+            val videoDuration = remember(uri) {
+                try {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    if (uri.scheme == "file") retriever.setDataSource(uri.path)
+                    else retriever.setDataSource(context, uri)
+                    val dur = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    retriever.release()
+                    dur
+                } catch (_: Exception) { 60000L }
+            }
+            VideoTrimmerDialog(
+                uri = uri,
+                durationMs = videoDuration,
+                onDismiss = { showTrimDialog = false }
+            )
+        }
+
+        // Compress dialog
+        if (showCompressDialog) {
+            CompressDialog(
+                uri = uri,
+                isVideo = uri.toString().lowercase().let { u -> u.endsWith(".mp4") || u.endsWith(".mkv") || u.endsWith(".avi") || u.endsWith(".mov") || u.endsWith(".webm") || u.endsWith(".3gp") || u.endsWith(".flv") || u.endsWith(".wmv") || u.endsWith(".m4v") },
+                onDismiss = { showCompressDialog = false }
+            )
+        }
+
         // Image editor — at VideoPlayer level so it survives ActionMenuDialog dismissal
         if (showImageEditor) {
             MediaEditorDialog(
@@ -1003,10 +1034,12 @@ fun VideoPlayer(
                 isFavorite = isFavorite,
                 onDelete = onDelete,
                 onFileChanged = {
-                    // File was moved/copied — treat like delete (skip to next)
                     showActionMenu = false
                     onDelete(uri)
-                }
+                },
+                onTrim = { showTrimDialog = true },
+                onCompress = { showCompressDialog = true },
+                onHideInVault = { u -> onHideInVault(u) }
             )
         }
 
@@ -1129,14 +1162,15 @@ fun ActionMenuDialog(
     isFavorite: Boolean = false,
     onDelete: (Uri) -> Unit = {},
     onRenameFile: (Uri, String) -> Unit = { _, _ -> },
-    onEdit: () -> Unit = {}
+    onEdit: () -> Unit = {},
+    onHideInVault: (Uri) -> Unit = {},
+    onTrim: () -> Unit = {},
+    onCompress: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val mediaInfo = remember { getMediaInfo(context, uri) }
     var folderPickerOp by remember { mutableStateOf<FileOperation?>(null) }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var showTrimDialog by remember { mutableStateOf(false) }
-    var showCompressDialog by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1164,16 +1198,21 @@ fun ActionMenuDialog(
                     }
                 }
                 if (isVideo) {
-                    TextButton(onClick = { showTrimDialog = true; onDismiss() }) {
+                    TextButton(onClick = { onDismiss(); onTrim() }) {
                         Icon(Icons.Default.ContentCut, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Trim")
                     }
                 }
-                TextButton(onClick = { showCompressDialog = true; onDismiss() }) {
+                TextButton(onClick = { onDismiss(); onCompress() }) {
                     Icon(Icons.Default.Compress, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Compress")
+                }
+                TextButton(onClick = { onDismiss(); onHideInVault(uri) }) {
+                    Icon(Icons.Default.Lock, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Hide in Vault")
                 }
                 TextButton(onClick = { shareMedia(context, uri, isVideo); onDismiss() }) {
                     Icon(Icons.Default.Share, null)
@@ -1210,36 +1249,6 @@ fun ActionMenuDialog(
         confirmButton = {},
         shape = RoundedCornerShape(20.dp)
     )
-
-    if (showTrimDialog) {
-        // Get video duration for trimmer
-        val videoDuration = remember {
-            try {
-                val retriever = android.media.MediaMetadataRetriever()
-                if (uri.scheme == "file") {
-                    retriever.setDataSource(uri.path)
-                } else {
-                    retriever.setDataSource(context, uri)
-                }
-                val dur = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                retriever.release()
-                dur
-            } catch (_: Exception) { 60000L }
-        }
-        VideoTrimmerDialog(
-            uri = uri,
-            durationMs = videoDuration,
-            onDismiss = { showTrimDialog = false }
-        )
-    }
-
-    if (showCompressDialog) {
-        CompressDialog(
-            uri = uri,
-            isVideo = isVideo,
-            onDismiss = { showCompressDialog = false }
-        )
-    }
 
     if (folderPickerOp != null) {
         val currentOp = folderPickerOp!!

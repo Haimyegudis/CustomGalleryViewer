@@ -15,6 +15,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.customgalleryviewer.data.MediaFilterType
+import kotlinx.coroutines.launch
 
 @Composable
 fun DeviceFolderScreen(
@@ -125,10 +126,29 @@ fun DeviceFolderScreen(
                 onSortChange = { settingsViewModel.setLocalSort(it) },
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                 onDeleteItem = { uri ->
-                    try { uri.path?.let { java.io.File(it).delete() } } catch (_: Exception) {}
-                    viewModel.loadFolder(bucketId, force = true)
+                    viewModel.removeFileFromList(uri) // instant UI update
+                    try {
+                        uri.path?.let { java.io.File(it).delete() }
+                        // Also remove from MediaStore
+                        try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                    } catch (_: Exception) {}
                 },
                 onRefresh = { viewModel.loadFolder(bucketId, force = true) },
+                onHideInVault = { uri ->
+                    val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+                    scope.launch {
+                        val vm = com.example.customgalleryviewer.util.VaultManager::class.java
+                        // Use entry point to get vault manager
+                        val vaultMgr2 = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                            context.applicationContext,
+                            WatchPositionEntryPoint::class.java
+                        ).vaultManager()
+                        vaultMgr2.moveToVault(uri)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            viewModel.loadFolder(bucketId, force = true)
+                        }
+                    }
+                },
                 initialScrollIndex = scrollIndex.intValue,
                 initialScrollOffset = scrollOffset.intValue,
                 onScrollChanged = { idx, off -> scrollIndex.intValue = idx; scrollOffset.intValue = off }
@@ -141,6 +161,8 @@ fun DeviceFolderScreen(
             var isRepeatListOn by remember { mutableStateOf(prefs.getBoolean("repeat_list_on", false)) }
             val pipState = rememberPipState()
             val castManager = rememberCastManager()
+            val vaultMgr = rememberVaultManager()
+            val vaultScope = rememberCoroutineScope()
 
             PlayerContentView(
                 currentMedia = currentMedia,
@@ -163,7 +185,13 @@ fun DeviceFolderScreen(
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                 isFavoriteCheck = { uri -> viewModel.isFavorite(uri) },
                 pipState = pipState,
-                castManager = castManager
+                castManager = castManager,
+                onHideInVault = { uri ->
+                    vaultScope.launch {
+                        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vaultMgr.moveToVault(uri) }
+                        if (ok) viewModel.loadFolder(bucketId, force = true)
+                    }
+                }
             )
         }
     }

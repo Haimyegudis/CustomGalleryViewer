@@ -71,6 +71,8 @@ fun HomeScreen(
     val recentlyAdded by viewModel.recentlyAdded.collectAsState()
     val context = LocalContext.current
     var showSearchBar by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showRecent by remember { mutableStateOf(false) }
 
     // Double-back-to-exit
     var backPressedOnce by remember { mutableStateOf(false) }
@@ -142,26 +144,9 @@ fun HomeScreen(
                             onClick = { showSearchBar = !showSearchBar },
                             modifier = Modifier.size(44.dp)
                         ) {
-                            Icon(
-                                Icons.Default.Search, "Search",
-                                tint = if (showSearchBar) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        // Map
-                        IconButton(
-                            onClick = onNavigateToMap,
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(Icons.Default.Map, "Map", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        }
-                        // Vault
-                        IconButton(
-                            onClick = onNavigateToVault,
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(Icons.Default.Lock, "Vault", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Search, "Search",
+                                tint = if (showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp))
                         }
                         // View mode toggle
                         IconButton(
@@ -183,14 +168,47 @@ fun HomeScreen(
                                 },
                                 "View Mode",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
+                                modifier = Modifier.size(20.dp))
                         }
-                        IconButton(
-                            onClick = onNavigateToSettings,
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(Icons.Default.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        // More menu (vault, map, duplicates, settings, recent toggle)
+                        Box {
+                            IconButton(
+                                onClick = { showMoreMenu = true },
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Icon(Icons.Default.MoreVert, "More", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            }
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Vault") },
+                                    onClick = { showMoreMenu = false; onNavigateToVault() },
+                                    leadingIcon = { Icon(Icons.Default.Lock, null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Map") },
+                                    onClick = { showMoreMenu = false; onNavigateToMap() },
+                                    leadingIcon = { Icon(Icons.Default.Map, null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Find Duplicates") },
+                                    onClick = { showMoreMenu = false; onNavigateToDuplicates() },
+                                    leadingIcon = { Icon(Icons.Default.FindReplace, null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (showRecent) "Hide Recent" else "Show Recent") },
+                                    onClick = { showRecent = !showRecent; showMoreMenu = false },
+                                    leadingIcon = { Icon(Icons.Default.History, null) }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Settings") },
+                                    onClick = { showMoreMenu = false; onNavigateToSettings() },
+                                    leadingIcon = { Icon(Icons.Default.Settings, null) }
+                                )
+                            }
                         }
                     }
                 }
@@ -277,7 +295,7 @@ fun HomeScreen(
             }
 
             // Recently Watched row
-            if (recentlyWatched.isNotEmpty() && !showSearchBar) {
+            if (showRecent && recentlyWatched.isNotEmpty() && !showSearchBar) {
                 Text(
                     "Recently Watched",
                     fontSize = 14.sp,
@@ -315,7 +333,7 @@ fun HomeScreen(
             }
 
             // Recently Added row
-            if (recentlyAdded.isNotEmpty() && !showSearchBar) {
+            if (showRecent && recentlyAdded.isNotEmpty() && !showSearchBar) {
                 Text(
                     "Recently Added",
                     fontSize = 14.sp,

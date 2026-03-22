@@ -142,6 +142,18 @@ class SettingsManager @Inject constructor(
 
     fun getAccentColor(): String = prefs.getString(KEY_ACCENT_COLOR, "cyan") ?: "cyan"
 
+    // --- Background Wallpaper (Skin) ---
+    private val _wallpaperUri = MutableStateFlow(getWallpaper())
+    val wallpaperUri: StateFlow<String?> = _wallpaperUri.asStateFlow()
+
+    fun setWallpaper(uri: String?) {
+        if (uri == null) prefs.edit().remove("wallpaper_uri").apply()
+        else prefs.edit().putString("wallpaper_uri", uri).apply()
+        _wallpaperUri.value = uri
+    }
+
+    fun getWallpaper(): String? = prefs.getString("wallpaper_uri", null)
+
     // --- Gesture Settings ---
     private val defaultGestures = mapOf(
         GestureType.DOUBLE_TAP_LEFT to GestureAction.PREVIOUS,

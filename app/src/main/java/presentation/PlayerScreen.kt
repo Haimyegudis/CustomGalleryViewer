@@ -96,6 +96,7 @@ interface PipStateEntryPoint {
 @InstallIn(SingletonComponent::class)
 interface WatchPositionEntryPoint {
     fun watchPositionDao(): com.example.customgalleryviewer.data.WatchPositionDao
+    fun vaultManager(): com.example.customgalleryviewer.util.VaultManager
 }
 
 @Composable
@@ -115,6 +116,14 @@ fun rememberCastManager(): CastManager {
 }
 
 @Composable
+fun rememberVaultManager(): com.example.customgalleryviewer.util.VaultManager {
+    val context = LocalContext.current
+    return remember {
+        EntryPointAccessors.fromApplication(context.applicationContext, WatchPositionEntryPoint::class.java).vaultManager()
+    }
+}
+
+@Composable
 fun PlayerScreen(
     playlistId: Long,
     onBackToHome: () -> Unit = {},
@@ -123,6 +132,8 @@ fun PlayerScreen(
 ) {
     val pipState = rememberPipState()
     val castManager = rememberCastManager()
+    val vaultManager = rememberVaultManager()
+    val vaultScope = rememberCoroutineScope()
     val currentMedia by viewModel.currentMedia.collectAsState()
     val isGalleryMode by viewModel.isGalleryMode.collectAsState()
     val filteredGalleryItems by viewModel.filteredGalleryItems.collectAsState()
@@ -219,12 +230,21 @@ fun PlayerScreen(
                     onBackToHome = onBackToHome,
                     onBrowseFolder = { uri, name -> viewModel.enterBrowseMode(uri, name) },
                     onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
-                    onDeleteItem = { uri -> viewModel.removeFromList(uri) },
+                    onDeleteItem = { uri ->
+                        viewModel.removeFromList(uri) // instant UI update
+                        try { uri.path?.let { java.io.File(it).delete() } } catch (_: Exception) {}
+                        try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                    },
                     initialSort = settingsViewModel.getLocalSort(),
                     onSortChange = { settingsViewModel.setLocalSort(it) },
                     onRefresh = {
-                        // Force reload by clearing loaded state
                         viewModel.forceReload(playlistId)
+                    },
+                    onHideInVault = { uri ->
+                        vaultScope.launch(Dispatchers.IO) {
+                            vaultManager.moveToVault(uri)
+                            withContext(Dispatchers.Main) { viewModel.forceReload(playlistId) }
+                        }
                     },
                     initialScrollIndex = scrollIndex.intValue,
                     initialScrollOffset = scrollOffset.intValue,
@@ -247,7 +267,17 @@ fun PlayerScreen(
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
                 isFavoriteCheck = { uri -> viewModel.isFavorite(uri) },
                 pipState = pipState,
-                castManager = castManager
+                castManager = castManager,
+                onHideInVault = { uri ->
+                    vaultScope.launch(Dispatchers.IO) {
+                        val ok = vaultManager.moveToVault(uri)
+                        withContext(Dispatchers.Main) {
+                            if (ok) {
+                                viewModel.onNext() // skip to next after hiding
+                            }
+                        }
+                    }
+                }
             )
         }
     }
@@ -273,6 +303,7 @@ fun GalleryGridView(
     onBrowseFolder: (Uri, String) -> Unit = { _, _ -> },
     onToggleFavorite: (Uri) -> Unit = {},
     onDeleteItem: (Uri) -> Unit = {},
+    onHideInVault: (Uri) -> Unit = {},
     onRefresh: () -> Unit = {},
     initialSort: String = "default",
     onSortChange: (String) -> Unit = {},
@@ -1168,6 +1199,19 @@ fun GalleryGridView(
                             Spacer(Modifier.width(12.dp))
                             Text("Open With", modifier = Modifier.weight(1f))
                         }
+                        // Hide in Vault
+                        TextButton(
+                            onClick = {
+                                val uri = contextMenuUri
+                                contextMenuUri = null
+                                if (uri != null) onHideInVault(uri)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Lock, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Hide in Vault", modifier = Modifier.weight(1f))
+                        }
                         // Delete
                         TextButton(
                             onClick = {
@@ -1776,7 +1820,8 @@ fun PlayerContentView(
     onToggleFavorite: (Uri) -> Unit = {},
     isFavoriteCheck: (Uri) -> Boolean = { false },
     pipState: com.example.customgalleryviewer.logic.PipState? = null,
-    castManager: CastManager? = null
+    castManager: CastManager? = null,
+    onHideInVault: (Uri) -> Unit = {}
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
@@ -1830,6 +1875,7 @@ fun PlayerContentView(
                     isFavorite = isFav,
                     pipState = pipState,
                     castManager = castManager,
+                    onHideInVault = onHideInVault,
                     modifier = Modifier.fillMaxSize()
                 )
                 } // end if initialPosition >= 0
@@ -1950,7 +1996,8 @@ fun PlayerContentView(
                         onDismiss = { showActionMenu = false },
                         onToggleFavorite = onToggleFavorite,
                         isFavorite = isFavoriteCheck(uri),
-                        onEdit = { showImageEditor = true }
+                        onEdit = { showImageEditor = true },
+                        onHideInVault = { u -> onHideInVault(u) }
                     )
                 }
             }

@@ -112,4 +112,8 @@ class SettingsViewModel @Inject constructor(
     // Gestures
     fun getGestureSettings(): Map<GestureType, GestureAction> = settingsManager.getAllGestureSettings()
     fun setGestureAction(type: GestureType, action: GestureAction) = settingsManager.setGestureAction(type, action)
+
+    // Wallpaper
+    fun getWallpaper(): String? = settingsManager.getWallpaper()
+    fun setWallpaper(uri: String?) = settingsManager.setWallpaper(uri)
 }

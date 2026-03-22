@@ -39,17 +39,40 @@ class DuplicateFinderViewModel @Inject constructor(
 
     fun deleteFile(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                context.contentResolver.delete(uri, null, null)
-            } catch (_: Exception) {
-                // Try file-based delete
-                try {
-                    val path = getPathFromUri(uri)
-                    if (path != null) File(path).delete()
-                } catch (_: Exception) {}
-            }
-            // Rescan
+            performDelete(uri)
             scan()
+        }
+    }
+
+    /** Keep the first file in a group, delete the rest */
+    fun keepFirstInGroup(group: DuplicateGroup) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val toDelete = group.files.drop(1) // keep first, delete rest
+            toDelete.forEach { performDelete(it.uri) }
+            scan()
+        }
+    }
+
+    /** Keep the first file in every group, delete all other duplicates */
+    fun cleanAll() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            val current = _duplicates.value
+            current.forEach { group ->
+                group.files.drop(1).forEach { performDelete(it.uri) }
+            }
+            scan()
+        }
+    }
+
+    private fun performDelete(uri: Uri) {
+        try {
+            context.contentResolver.delete(uri, null, null)
+        } catch (_: Exception) {
+            try {
+                val path = getPathFromUri(uri)
+                if (path != null) File(path).delete()
+            } catch (_: Exception) {}
         }
     }
 

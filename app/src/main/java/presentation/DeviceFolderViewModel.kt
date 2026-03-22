@@ -73,12 +73,40 @@ class DeviceFolderViewModel @Inject constructor(
     private var currentHistoryIndex = -1
     private var playbackList: List<Uri> = emptyList()
     private var loadedBucketId: Long? = null
+    private var fileObserver: android.os.FileObserver? = null
 
     private fun createScanner() = FileScanner(context, cacheManager, settingsManager.getShowHidden())
+
+    override fun onCleared() {
+        super.onCleared()
+        fileObserver?.stopWatching()
+    }
 
     fun loadFolder(bucketId: Long, force: Boolean = false) {
         if (!force && loadedBucketId == bucketId && _files.value.isNotEmpty()) return
         loadedBucketId = bucketId
+
+        // Start watching folder for changes (new/deleted files)
+        viewModelScope.launch(Dispatchers.IO) {
+            val folderPath = scanner.getFolderPath(bucketId) ?: return@launch
+            fileObserver?.stopWatching()
+            fileObserver = object : android.os.FileObserver(
+                File(folderPath),
+                CREATE or DELETE or MOVED_FROM or MOVED_TO or CLOSE_WRITE
+            ) {
+                private var pendingRefresh = false
+                override fun onEvent(event: Int, path: String?) {
+                    if (pendingRefresh) return
+                    pendingRefresh = true
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(500) // debounce
+                        pendingRefresh = false
+                        quickRefreshFolder(bucketId)
+                    }
+                }
+            }
+            fileObserver?.startWatching()
+        }
         val startTime = System.currentTimeMillis()
 
         // Show cached files synchronously - only use file:// URIs
@@ -264,6 +292,32 @@ class DeviceFolderViewModel @Inject constructor(
                 .build()
             imageLoader.enqueue(request)
         }
+    }
+
+    private val mediaExtensions = setOf("jpg","jpeg","png","webp","bmp","gif","heic","heif","avif","mp4","mkv","avi","mov","flv","wmv","3gp","webm","ts","m4v","mpg","mpeg","m3u8","m3u","m2ts","mts")
+
+    private fun quickRefreshFolder(bucketId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val folderPath = scanner.getFolderPath(bucketId) ?: return@launch
+            val dir = File(folderPath)
+            if (!dir.exists()) return@launch
+            val currentFiles = dir.listFiles()
+                ?.filter { it.isFile && !it.isHidden && it.extension.lowercase() in mediaExtensions }
+                ?.map { android.net.Uri.fromFile(it) }
+                ?: emptyList()
+            val oldSet = _files.value.toSet()
+            val newSet = currentFiles.toSet()
+            if (oldSet != newSet) {
+                _files.value = currentFiles
+                playbackList = currentFiles
+                folderFileCache.saveFolderFiles(bucketId, currentFiles)
+            }
+        }
+    }
+
+    fun removeFileFromList(uri: Uri) {
+        _files.value = _files.value.filter { it != uri }
+        playbackList = playbackList.filter { it != uri }
     }
 
     fun setGalleryMode(mode: Boolean) {

@@ -108,10 +108,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by settingsManager.themeModeFlow.collectAsState()
             val accentColor by settingsManager.accentColorFlow.collectAsState()
+            val wallpaperUri by settingsManager.wallpaperUri.collectAsState()
             CustomGalleryViewerTheme(themeMode = themeMode, accentColor = accentColor) {
                 var showSplash by remember { mutableStateOf(true) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
+
+                // Wallpaper background
+                if (wallpaperUri != null) {
+                    coil.compose.AsyncImage(
+                        model = coil.request.ImageRequest.Builder(this@MainActivity)
+                            .data(android.net.Uri.parse(wallpaperUri))
+                            .crossfade(false).build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        alpha = 0.15f
+                    )
+                }
 
                 // One-time permission request at startup
                 val permissionLauncher = rememberLauncherForActivityResult(

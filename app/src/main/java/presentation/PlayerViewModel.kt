@@ -109,14 +109,15 @@ class PlayerViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsManager.gallerySortFlow.collectLatest { sort ->
-                if (originalRawSet.isNotEmpty() && sort != currentGallerySort) {
+                // Only re-sort if user explicitly changed the sort order
+                if (originalRawSet.isNotEmpty() && sort != currentGallerySort && currentGallerySort != null) {
                     updateGalleryList(sort)
                 }
             }
         }
         viewModelScope.launch {
             settingsManager.playbackSortFlow.collectLatest { sort ->
-                if (originalRawSet.isNotEmpty() && sort != currentPlaybackSort) {
+                if (originalRawSet.isNotEmpty() && sort != currentPlaybackSort && currentPlaybackSort != null) {
                     updatePlaybackList(sort)
                 }
             }
@@ -158,20 +159,24 @@ class PlayerViewModel @Inject constructor(
         history.clear()
         currentHistoryIndex = -1
 
-        // Show cached files instantly
+        // Show cached files instantly — use the cached order as-is (already sorted from last session)
         val cached = folderFileCache.getPlaylistFiles(playlistId)
         if (cached.isNotEmpty()) {
             originalRawSet.addAll(cached)
-            viewModelScope.launch {
-                updateGalleryList(settingsManager.getGallerySort())
-                updatePlaybackList(settingsManager.getPlaybackSort())
-                if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
-                    history.add(0)
-                    currentHistoryIndex = 0
-                    _currentMedia.value = _playbackItems[0]
-                }
-                _isLoading.value = false
+            // Use cached order directly without re-sorting
+            val gallerySort = settingsManager.getGallerySort()
+            val playbackSort = settingsManager.getPlaybackSort()
+            currentGallerySort = gallerySort
+            currentPlaybackSort = playbackSort
+            _galleryItems.value = cached
+            _playbackItems = cached
+            filterGalleryItems(_searchQuery.value, _mediaFilter.value)
+            if (_currentMedia.value == null && _playbackItems.isNotEmpty()) {
+                history.add(0)
+                currentHistoryIndex = 0
+                _currentMedia.value = _playbackItems[0]
             }
+            _isLoading.value = false
         }
 
         // Background scan for fresh data
@@ -243,6 +248,8 @@ class PlayerViewModel @Inject constructor(
         val sorted = sortList(originalRawSet.toList(), order)
         _galleryItems.value = sorted
         filterGalleryItems(_searchQuery.value, _mediaFilter.value)
+        // Save sorted order to cache so next load is instant
+        loadedPlaylistId?.let { folderFileCache.savePlaylistFiles(it, sorted) }
         Log.d("PlayerViewModel", "Gallery updated with ${sorted.size} items")
     }
 
@@ -262,44 +269,82 @@ class PlayerViewModel @Inject constructor(
         Log.d("PlayerViewModel", "Playback updated with ${sorted.size} items")
     }
 
-    private suspend fun sortList(list: List<Uri>, order: SortOrder): List<Uri> = withContext(Dispatchers.Default) {
+    // Cache for file metadata to avoid repeated I/O
+    private val sizeCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val durationCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private suspend fun sortList(list: List<Uri>, order: SortOrder): List<Uri> = withContext(Dispatchers.IO) {
         when (order) {
             SortOrder.RANDOM -> list
             SortOrder.BY_NAME -> list.sortedBy { it.lastPathSegment?.lowercase() ?: "" }
-            SortOrder.BY_DATE -> list.sortedByDescending {
-                try { File(it.path ?: "").lastModified() } catch (e: Exception) { 0L }
-            }
+            SortOrder.BY_DATE -> list.sortedByDescending { getFileDate(it) }
             SortOrder.BY_SIZE -> list.sortedByDescending { getFileSize(it) }
             SortOrder.BY_DURATION -> list.sortedByDescending { getVideoDuration(it) }
         }
     }
 
+    private fun getFileDate(uri: Uri): Long {
+        val key = uri.toString()
+        dateCache[key]?.let { return it }
+        val result = try {
+            if (uri.scheme == "file") {
+                File(uri.path ?: "").lastModified()
+            } else {
+                appContext.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATE_MODIFIED), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getLong(0) * 1000L else 0L
+                } ?: 0L
+            }
+        } catch (_: Exception) { 0L }
+        dateCache[key] = result
+        return result
+    }
+
     private fun getFileSize(uri: Uri): Long {
-        return try {
+        val key = uri.toString()
+        sizeCache[key]?.let { return it }
+        val result = try {
             if (uri.scheme == "file") {
                 File(uri.path ?: "").length()
             } else {
-                appContext.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use {
+                appContext.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null)?.use {
                     if (it.moveToFirst()) it.getLong(0) else 0L
                 } ?: 0L
             }
-        } catch (e: Exception) { 0L }
+        } catch (_: Exception) { 0L }
+        sizeCache[key] = result
+        return result
     }
 
     private fun getVideoDuration(uri: Uri): Long {
-        val retriever = MediaMetadataRetriever()
-        return try {
+        val key = uri.toString()
+        durationCache[key]?.let { return it }
+        val result = try {
             if (uri.scheme == "file") {
-                retriever.setDataSource(uri.path)
+                val path = uri.path ?: ""
+                // Fast path: MediaStore duration column
+                val dur = appContext.contentResolver.query(
+                    android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(android.provider.MediaStore.Video.VideoColumns.DURATION),
+                    "${android.provider.MediaStore.MediaColumns.DATA}=?",
+                    arrayOf(path), null
+                )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L } ?: 0L
+                if (dur > 0) dur else {
+                    // Slow fallback
+                    val retriever = MediaMetadataRetriever()
+                    retriever.setDataSource(path)
+                    val d = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    retriever.release()
+                    d
+                }
             } else {
-                retriever.setDataSource(appContext, uri)
+                appContext.contentResolver.query(uri, arrayOf(android.provider.MediaStore.Video.VideoColumns.DURATION), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getLong(0) else 0L
+                } ?: 0L
             }
-            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            durationStr?.toLongOrNull() ?: 0L
-        } catch (e: Exception) { 0L }
-        finally {
-            try { retriever.release() } catch (_: Exception) {}
-        }
+        } catch (_: Exception) { 0L }
+        durationCache[key] = result
+        return result
     }
 
     private fun filterGalleryItems(query: String, filter: MediaFilterType) {

@@ -32,7 +32,11 @@ class MapViewModel @Inject constructor(
     private fun loadGeoMedia() {
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
-            _geoMedia.value = ExifGeoExtractor.extractGeotaggedMedia(context)
+            try {
+                _geoMedia.value = ExifGeoExtractor.extractGeotaggedMedia(context)
+            } catch (_: Exception) {
+                _geoMedia.value = emptyList()
+            }
             _isLoading.value = false
         }
     }

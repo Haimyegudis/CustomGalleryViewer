@@ -84,18 +84,62 @@ fun DuplicateFinderScreen(
                     Text("No duplicates found", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                Text(
-                    "${duplicates.size} duplicate group${if (duplicates.size != 1) "s" else ""} found",
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
+                var showCleanAllConfirm by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${duplicates.size} group${if (duplicates.size != 1) "s" else ""} found",
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = { showCleanAllConfirm = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clean All", fontSize = 13.sp)
+                    }
+                }
+
+                if (showCleanAllConfirm) {
+                    val totalToDelete = duplicates.sumOf { it.files.size - 1 }
+                    AlertDialog(
+                        onDismissRequest = { showCleanAllConfirm = false },
+                        title = { Text("Clean All Duplicates?", fontWeight = FontWeight.SemiBold) },
+                        text = {
+                            Text("This will keep the first file from each group and delete $totalToDelete duplicate${if (totalToDelete != 1) "s" else ""}. This cannot be undone.")
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showCleanAllConfirm = false
+                                viewModel.cleanAll()
+                            }) {
+                                Text("Delete $totalToDelete files", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showCleanAllConfirm = false }) { Text("Cancel") }
+                        }
+                    )
+                }
+
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(duplicates) { group ->
-                        DuplicateGroupCard(group, onDelete = { viewModel.deleteFile(it) })
+                        DuplicateGroupCard(
+                            group,
+                            onDelete = { viewModel.deleteFile(it) },
+                            onKeepFirst = { viewModel.keepFirstInGroup(group) }
+                        )
                     }
                 }
             }
@@ -106,22 +150,34 @@ fun DuplicateFinderScreen(
 @Composable
 private fun DuplicateGroupCard(
     group: DuplicateGroup,
-    onDelete: (Uri) -> Unit
+    onDelete: (Uri) -> Unit,
+    onKeepFirst: () -> Unit
 ) {
     val context = LocalContext.current
+    var showConfirm by remember { mutableStateOf(false) }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                "${group.files.size} identical files",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(8.dp))
-            group.files.forEach { file ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${group.files.size} identical files",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                TextButton(onClick = { showConfirm = true }) {
+                    Text("Keep first only", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            group.files.forEachIndexed { index, file ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -150,21 +206,37 @@ private fun DuplicateGroupCard(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            formatSize(file.size),
+                            formatSize(file.size) + if (index == 0) "  (kept)" else "",
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { onDelete(file.uri) }) {
-                        Icon(
-                            Icons.Default.Delete, "Delete",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (index > 0) {
+                        IconButton(onClick = { onDelete(file.uri) }) {
+                            Icon(
+                                Icons.Default.Delete, "Delete",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("Keep first file only?", fontWeight = FontWeight.SemiBold) },
+            text = { Text("Will delete ${group.files.size - 1} duplicate${if (group.files.size > 2) "s" else ""} and keep \"${group.files.first().name}\".") },
+            confirmButton = {
+                TextButton(onClick = { showConfirm = false; onKeepFirst() }) {
+                    Text("Delete duplicates", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } }
+        )
     }
 }
 
