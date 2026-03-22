@@ -1,13 +1,16 @@
 package com.example.customgalleryviewer
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -53,10 +56,46 @@ import com.example.customgalleryviewer.presentation.HomeScreen
 import com.example.customgalleryviewer.presentation.PlayerScreen
 import com.example.customgalleryviewer.presentation.SettingsScreen
 import com.nowwhat.customgalleryviewer.ui.theme.CustomGalleryViewerTheme
+import com.example.customgalleryviewer.logic.PipState
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var pipState: PipState
+
+    private var isInPipMode = false
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pipState.isVideoPlaying.value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            enterPipMode()
+        }
+    }
+
+    private fun enterPipMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build()
+            enterPictureInPictureMode(params)
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPipMode = isInPictureInPictureMode
+        pipState.setInPipMode(isInPictureInPictureMode)
+        // If PiP was dismissed (user pressed X), finish the activity
+        if (!isInPictureInPictureMode && !isChangingConfigurations) {
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.CREATED) &&
+                !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                finishAndRemoveTask()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

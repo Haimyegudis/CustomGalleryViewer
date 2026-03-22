@@ -447,6 +447,11 @@ private fun AllPhotosContent(
             )
         }
     } else {
+        // Sort: favorites first, then group by source
+        val favFolders = folders.filter { viewModel.isFolderFavorite(it.bucketId) }
+        val phoneFolders = folders.filter { !it.isExternal && !viewModel.isFolderFavorite(it.bucketId) }
+        val usbFolders = folders.filter { it.isExternal && !viewModel.isFolderFavorite(it.bucketId) }
+
         Column {
         // Selection header for folders
         if (isFolderSelectionMode) {
@@ -461,56 +466,146 @@ private fun AllPhotosContent(
             }
         }
 
+        // Build sectioned folder list
+        data class FolderSection(val title: String, val icon: @Composable () -> Unit, val folders: List<MediaFolder>)
+        val sections = buildList {
+            if (favFolders.isNotEmpty()) add(FolderSection("Favorites", { Icon(Icons.Default.Star, null, tint = Color(0xFFFFD700), modifier = Modifier.size(18.dp)) }, favFolders))
+            if (phoneFolders.isNotEmpty()) add(FolderSection("Phone", { Icon(Icons.Default.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }, phoneFolders))
+            if (usbFolders.isNotEmpty()) add(FolderSection("USB / External", { Icon(Icons.Default.Usb, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp)) }, usbFolders))
+        }
+
+        // Helper: section header
+        @Composable
+        fun SectionHeader(section: FolderSection) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                section.icon()
+                Text(section.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("(${section.folders.size})", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.4f))
+            }
+        }
+
+        // Helper: favorite star overlay
+        @Composable
+        fun FavStar(bucketId: Long, modifier: Modifier = Modifier) {
+            if (viewModel.isFolderFavorite(bucketId)) {
+                Icon(Icons.Default.Star, null, tint = Color(0xFFFFD700), modifier = modifier.size(20.dp))
+            }
+        }
+
         when (viewMode) {
             "list" -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().weight(1f),
                     contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
-                    items(folders) { folder ->
-                        val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
-                        val displayUri = customCover ?: folder.thumbnailUri
-                        val isSel = folder.bucketId in selectedFolders
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(if (isSel) MaterialTheme.colorScheme.primary.copy(0.15f) else Color.Transparent)
-                                .pointerInput(isFolderSelectionMode) {
-                                    detectTapGestures(
-                                        onTap = {
-                                            if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
-                                            else onFolderClick(folder)
-                                        },
-                                        onLongPress = { menuFolder = folder }
-                                    )
-                                }
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))) {
-                                if (displayUri != null) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context).data(displayUri)
-                                            .decoderFactory(VideoFrameDecoder.Factory()).size(128).crossfade(false).allowHardware(true).build(),
-                                        contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.3f))
+                    sections.forEach { section ->
+                        item(key = "header_${section.title}") { SectionHeader(section) }
+                        items(section.folders, key = { it.bucketId }) { folder ->
+                            val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                            val displayUri = customCover ?: folder.thumbnailUri
+                            val isSel = folder.bucketId in selectedFolders
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(if (isSel) MaterialTheme.colorScheme.primary.copy(0.15f) else Color.Transparent)
+                                    .pointerInput(isFolderSelectionMode) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
+                                                else onFolderClick(folder)
+                                            },
+                                            onLongPress = { menuFolder = folder }
+                                        )
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))) {
+                                    if (displayUri != null) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context).data(displayUri)
+                                                .decoderFactory(VideoFrameDecoder.Factory()).size(128).crossfade(false).allowHardware(true).build(),
+                                            contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.3f))
+                                        }
                                     }
                                 }
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(folder.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${folder.mediaCount} files", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                                }
+                                FavStar(folder.bucketId)
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(folder.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${folder.mediaCount} files", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.5f))
+                        }
+                    }
+                }
+            }
+            "hero" -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    sections.forEach { section ->
+                        item(key = "header_${section.title}") { SectionHeader(section) }
+                        items(section.folders, key = { it.bucketId }) { folder ->
+                            val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                            val displayUri = customCover ?: folder.thumbnailUri
+                            val isSel = folder.bucketId in selectedFolders
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(isFolderSelectionMode) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
+                                                else onFolderClick(folder)
+                                            },
+                                            onLongPress = { menuFolder = folder }
+                                        )
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSel) MaterialTheme.colorScheme.primary.copy(0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                                shadowElevation = 2.dp
+                            ) {
+                                Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+                                    if (displayUri != null) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context).data(displayUri)
+                                                .decoderFactory(VideoFrameDecoder.Factory()).size(512).crossfade(false).allowHardware(true).build(),
+                                            contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Folder, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurface.copy(0.2f))
+                                        }
+                                    }
+                                    Box(modifier = Modifier.fillMaxWidth().height(72.dp).align(Alignment.BottomCenter)
+                                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.7f)))))
+                                    Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                                        Text(folder.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("${folder.mediaCount} files", fontSize = 13.sp, color = Color.White.copy(0.7f))
+                                    }
+                                    // Fav star top-right
+                                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                                        FavStar(folder.bucketId)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
             else -> {
-                // Grid view (default and "hero")
+                // Grid view - use LazyColumn with grid sections
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxWidth().weight(1f),
@@ -518,20 +613,28 @@ private fun AllPhotosContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(folders) { folder ->
-                        val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
-                        val isSel = folder.bucketId in selectedFolders
-                        DeviceFolderCard(
-                            folder = folder,
-                            customCoverUri = customCover,
-                            isSelected = isSel,
-                            isSelectionMode = isFolderSelectionMode,
-                            onClick = {
-                                if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
-                                else onFolderClick(folder)
-                            },
-                            onLongPress = { menuFolder = folder }
-                        )
+                    // For grid, flatten with section headers spanning full width
+                    sections.forEach { section ->
+                        if (sections.size > 1 || favFolders.isNotEmpty()) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }, key = "header_${section.title}") {
+                                SectionHeader(section)
+                            }
+                        }
+                        items(section.folders, key = { it.bucketId }) { folder ->
+                            val customCover = viewModel.getFolderCoverByBucket(folder.bucketId)
+                            val isSel = folder.bucketId in selectedFolders
+                            DeviceFolderCard(
+                                folder = folder,
+                                customCoverUri = customCover,
+                                isSelected = isSel,
+                                isSelectionMode = isFolderSelectionMode,
+                                onClick = {
+                                    if (isFolderSelectionMode) selectedFolders = if (isSel) selectedFolders - folder.bucketId else selectedFolders + folder.bucketId
+                                    else onFolderClick(folder)
+                                },
+                                onLongPress = { menuFolder = folder }
+                            )
+                        }
                     }
                 }
             }
@@ -622,6 +725,15 @@ private fun AllPhotosContent(
             text = {
                 Column {
                     TextButton(onClick = {
+                        viewModel.toggleFolderFavorite(folder.bucketId)
+                        menuFolder = null
+                    }) {
+                        val isFav = viewModel.isFolderFavorite(folder.bucketId)
+                        Icon(if (isFav) Icons.Default.Star else Icons.Default.StarBorder, null, modifier = Modifier.size(20.dp), tint = if (isFav) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.width(12.dp))
+                        Text(if (isFav) "Remove from Favorites" else "Add to Favorites")
+                    }
+                    TextButton(onClick = {
                         selectedFolders = selectedFolders + folder.bucketId
                         menuFolder = null
                     }) {
@@ -659,7 +771,7 @@ private fun AllPhotosContent(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { menuFolder = null }) { Text("Cancel") } },
+            confirmButton = {},
             shape = RoundedCornerShape(20.dp)
         )
     }
@@ -718,77 +830,152 @@ private fun AllPhotosContent(
         )
     }
 
-    // Cover picker dialog
+    // Cover picker dialog with folder navigation
     if (coverPickerFolder != null) {
-        AlertDialog(
-            onDismissRequest = {
-                coverPickerFolder = null
-                coverPickerFiles = emptyList()
-            },
-            title = {
-                Text("Choose Cover", fontWeight = FontWeight.SemiBold)
-            },
-            text = {
-                Column {
-                    Text(
-                        coverPickerFolder!!.name,
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-                    if (coverPickerFiles.isEmpty()) {
+        val rootDir = remember { android.os.Environment.getExternalStorageDirectory() }
+        var browseDir by remember { mutableStateOf(java.io.File(coverPickerFolder!!.path)) }
+        var browseFiles by remember { mutableStateOf<List<Uri>>(coverPickerFiles) }
+        var browseFolders by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+        var isLoadingCover by remember { mutableStateOf(false) }
+
+        val mediaExtensions = remember { setOf("jpg","jpeg","png","webp","bmp","gif","heic","heif","avif","mp4","mkv","avi","mov","flv","wmv","3gp","webm","ts","m4v","m3u8") }
+
+        LaunchedEffect(browseDir) {
+            isLoadingCover = true
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val allItems = browseDir.listFiles() ?: emptyArray()
+                val dirs = allItems.filter { it.isDirectory && !it.isHidden }.sortedBy { it.name.lowercase() }
+                val files = allItems.filter { it.isFile && !it.isHidden && it.extension.lowercase() in mediaExtensions }
+                    .sortedBy { it.name.lowercase() }
+                    .map { Uri.fromFile(it) }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    browseFolders = dirs
+                    browseFiles = files
+                    isLoadingCover = false
+                }
+            }
+        }
+
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { coverPickerFolder = null; coverPickerFiles = emptyList() },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.8f),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Choose Cover", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+
+                    // Path + back
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (browseDir.absolutePath != rootDir.absolutePath) {
+                            IconButton(onClick = { browseDir.parentFile?.let { browseDir = it } }) {
+                                Icon(Icons.Default.ArrowBack, "Back")
+                            }
+                        }
                         Text(
-                            "No files found in this folder",
-                            color = MaterialTheme.colorScheme.onSurface.copy(0.4f),
-                            fontSize = 13.sp
+                            browseDir.absolutePath.removePrefix(rootDir.absolutePath).ifEmpty { "/" },
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.heightIn(max = 400.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(coverPickerFiles.size) { idx ->
-                            val fileUri = coverPickerFiles[idx]
-                            val ctx = LocalContext.current
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        viewModel.setFolderCoverByBucket(coverPickerFolder!!.bucketId, fileUri)
-                                        coverPickerFolder = null
-                                        coverPickerFiles = emptyList()
+
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+
+                    if (isLoadingCover) {
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentPadding = PaddingValues(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Folders first
+                            items(browseFolders.size) { idx ->
+                                val dir = browseFolders[idx]
+                                Surface(
+                                    onClick = { browseDir = dir },
+                                    modifier = Modifier.aspectRatio(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                                        Text(dir.name, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                                     }
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(ctx)
-                                        .data(fileUri)
-                                        .decoderFactory(VideoFrameDecoder.Factory())
-                                        .crossfade(false).allowHardware(true)
-                                        .size(200)
-                                        .build(),
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop,
-                                    error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
-                                )
+                                }
+                            }
+                            // Media files
+                            items(browseFiles.size) { idx ->
+                                val fileUri = browseFiles[idx]
+                                val ctx = LocalContext.current
+                                Box(
+                                    modifier = Modifier
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            viewModel.setFolderCoverByBucket(coverPickerFolder!!.bucketId, fileUri)
+                                            coverPickerFolder = null
+                                            coverPickerFiles = emptyList()
+                                        }
+                                ) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(ctx)
+                                            .data(fileUri)
+                                            .decoderFactory(VideoFrameDecoder.Factory())
+                                            .crossfade(false).allowHardware(true).size(200).build(),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                        error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                                    )
+                                }
+                            }
+                            if (browseFolders.isEmpty() && browseFiles.isEmpty()) {
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                        Text("Empty folder", color = MaterialTheme.colorScheme.onSurface.copy(0.4f))
+                                    }
+                                }
                             }
                         }
                     }
+
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { coverPickerFolder = null; coverPickerFiles = emptyList() }) {
+                            Text("Cancel")
+                        }
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    coverPickerFolder = null
-                    coverPickerFiles = emptyList()
-                }) {
-                    Text("Cancel")
-                }
-            },
-            shape = RoundedCornerShape(20.dp)
-        )
+            }
+        }
     }
 
 }

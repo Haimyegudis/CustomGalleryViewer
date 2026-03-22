@@ -76,9 +76,44 @@ import kotlin.math.abs
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import com.example.customgalleryviewer.logic.PipState
+import com.example.customgalleryviewer.util.CastManager
 import com.example.customgalleryviewer.presentation.components.FileOperation
 import com.example.customgalleryviewer.presentation.components.FolderPickerDialog
 import com.example.customgalleryviewer.presentation.components.MultiFolderPickerDialog
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface PipStateEntryPoint {
+    fun pipState(): PipState
+    fun castManager(): CastManager
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface WatchPositionEntryPoint {
+    fun watchPositionDao(): com.example.customgalleryviewer.data.WatchPositionDao
+}
+
+@Composable
+fun rememberPipState(): PipState {
+    val context = LocalContext.current
+    return remember {
+        EntryPointAccessors.fromApplication(context.applicationContext, PipStateEntryPoint::class.java).pipState()
+    }
+}
+
+@Composable
+fun rememberCastManager(): CastManager {
+    val context = LocalContext.current
+    return remember {
+        EntryPointAccessors.fromApplication(context.applicationContext, PipStateEntryPoint::class.java).castManager()
+    }
+}
 
 @Composable
 fun PlayerScreen(
@@ -87,6 +122,8 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val pipState = rememberPipState()
+    val castManager = rememberCastManager()
     val currentMedia by viewModel.currentMedia.collectAsState()
     val isGalleryMode by viewModel.isGalleryMode.collectAsState()
     val filteredGalleryItems by viewModel.filteredGalleryItems.collectAsState()
@@ -209,7 +246,9 @@ fun PlayerScreen(
                 onSaveWatchPosition = { uri, pos, dur -> viewModel.saveWatchPosition(uri, pos, dur) },
                 getWatchPosition = { uri -> viewModel.getWatchPosition(uri) },
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
-                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) }
+                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) },
+                pipState = pipState,
+                castManager = castManager
             )
         }
     }
@@ -269,6 +308,7 @@ fun GalleryGridView(
 
     // Rename dialog state
     var renameUri by remember { mutableStateOf<Uri?>(null) }
+    var editUri by remember { mutableStateOf<Uri?>(null) }
     var renameText by remember { mutableStateOf("") }
 
     // Multi-select state
@@ -1046,6 +1086,20 @@ fun GalleryGridView(
                             Spacer(Modifier.width(12.dp))
                             Text(if (isFav) "Unfavorite" else "Favorite", modifier = Modifier.weight(1f))
                         }
+                        // Edit (images only)
+                        if (!isVideo(menuUri.toString())) {
+                            TextButton(
+                                onClick = {
+                                    contextMenuUri = null
+                                    editUri = menuUri
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.PhotoFilter, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text("Edit", modifier = Modifier.weight(1f))
+                            }
+                        }
                         // Rename
                         TextButton(
                             onClick = {
@@ -1133,26 +1187,33 @@ fun GalleryGridView(
                         }
                     }
                 },
-                confirmButton = {
-                    TextButton(onClick = { contextMenuUri = null }) {
-                        Text("Cancel")
-                    }
-                },
+                confirmButton = {},
                 shape = RoundedCornerShape(20.dp)
             )
         }
 
         // Folder picker for copy/move
         if (folderPickerUri != null && folderPickerOp != null) {
-            val isMoveOp = folderPickerOp == com.example.customgalleryviewer.presentation.components.FileOperation.MOVE
+            val currentOp = folderPickerOp!!
             com.example.customgalleryviewer.presentation.components.FolderPickerDialog(
                 uri = folderPickerUri!!,
-                operation = folderPickerOp!!,
+                operation = currentOp,
                 onDismiss = { folderPickerUri = null; folderPickerOp = null },
                 onComplete = {
                     folderPickerUri = null; folderPickerOp = null
-                    if (isMoveOp) onRefresh()
+                    if (currentOp == com.example.customgalleryviewer.presentation.components.FileOperation.MOVE) {
+                        onRefresh()
+                    }
                 }
+            )
+        }
+
+        // Image editor dialog
+        editUri?.let { eUri ->
+            com.example.customgalleryviewer.presentation.components.MediaEditorDialog(
+                uri = eUri,
+                onDismiss = { editUri = null },
+                onSaved = { onRefresh() }
             )
         }
 
@@ -1717,9 +1778,12 @@ fun PlayerContentView(
     onSaveWatchPosition: (Uri, Long, Long) -> Unit = { _, _, _ -> },
     getWatchPosition: suspend (Uri) -> Long = { 0L },
     onToggleFavorite: (Uri) -> Unit = {},
-    isFavoriteCheck: (Uri) -> Boolean = { false }
+    isFavoriteCheck: (Uri) -> Boolean = { false },
+    pipState: com.example.customgalleryviewer.logic.PipState? = null,
+    castManager: CastManager? = null
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
+    var showImageEditor by remember { mutableStateOf(false) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val context = LocalContext.current
@@ -1737,7 +1801,18 @@ fun PlayerContentView(
             if (isVideoFile) {
                 var initialPosition by remember(uri) { mutableLongStateOf(-1L) }
                 LaunchedEffect(uri) {
-                    initialPosition = withContext(Dispatchers.IO) { getWatchPosition(uri) }
+                    val wp = withContext(Dispatchers.IO) {
+                        val dao = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                            context.applicationContext, WatchPositionEntryPoint::class.java
+                        ).watchPositionDao()
+                        dao.getPosition(uri.toString())
+                    }
+                    // If video was at or near the end (>95%), start from beginning
+                    initialPosition = if (wp != null && wp.duration > 0 && wp.position.toFloat() / wp.duration > 0.95f) {
+                        0L
+                    } else {
+                        wp?.position ?: 0L
+                    }
                 }
                 if (initialPosition < 0) {
                     // Wait for position to load - show black screen briefly
@@ -1757,6 +1832,8 @@ fun PlayerContentView(
                     onSavePosition = onSaveWatchPosition,
                     onToggleFavorite = onToggleFavorite,
                     isFavorite = isFav,
+                    pipState = pipState,
+                    castManager = castManager,
                     modifier = Modifier.fillMaxSize()
                 )
                 } // end if initialPosition >= 0
@@ -1862,11 +1939,22 @@ fun PlayerContentView(
 
                 }
 
+                if (showImageEditor) {
+                    com.example.customgalleryviewer.presentation.components.MediaEditorDialog(
+                        uri = uri,
+                        onDismiss = { showImageEditor = false },
+                        onSaved = {}
+                    )
+                }
+
                 if (showActionMenu) {
                     ActionMenuDialog(
                         uri = uri,
                         isVideo = false,
-                        onDismiss = { showActionMenu = false }
+                        onDismiss = { showActionMenu = false },
+                        onToggleFavorite = onToggleFavorite,
+                        isFavorite = isFavoriteCheck(uri),
+                        onEdit = { showImageEditor = true }
                     )
                 }
             }

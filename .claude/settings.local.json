@@ -42,7 +42,19 @@
       "Bash(find /tmp/vlc-android -name *Scroll* -type f)",
       "Bash(grep -E \"\\\\.\\(kt|java\\)$\")",
       "Bash(rm -f \"C:\\\\Users\\\\yegudish\\\\AndroidStudioProjects\\\\CustomGalleryViewer\\\\.git\\\\index.lock\")",
-      "Bash(rm -f C:/Users/yegudish/AndroidStudioProjects/CustomGalleryViewer/.git/index.lock)"
+      "Bash(rm -f C:/Users/yegudish/AndroidStudioProjects/CustomGalleryViewer/.git/index.lock)",
+      "Bash(/tmp/folder_navigation_analysis.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git status:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(./gradlew assembleDebug --stacktrace)",
+      "Bash(./gradlew compileDebugKotlin --info)",
+      "Bash(./gradlew kaptGenerateStubsDebugKotlin --info)",
+      "Bash(./gradlew kaptGenerateStubsDebugKotlin)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }

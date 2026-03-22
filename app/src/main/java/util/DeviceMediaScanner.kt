@@ -16,7 +16,8 @@ data class MediaFolder(
     val name: String,
     val path: String,
     val thumbnailUri: Uri?,
-    val mediaCount: Int
+    val mediaCount: Int,
+    val isExternal: Boolean = false
 )
 
 @Singleton
@@ -85,13 +86,21 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
             }
         }
 
+        // Mark MediaStore folders as external if their path is not under primary storage
+        val primaryPath = android.os.Environment.getExternalStorageDirectory().absolutePath
+        for ((_, folder) in folders) {
+            if (!folder.path.startsWith(primaryPath)) {
+                folder.isExternal = true
+            }
+        }
+
         // Also scan filesystem for folders not indexed by MediaStore
         // (e.g., folders with .nomedia, or files not yet scanned)
         val knownPaths = folders.values.map { it.path }.toSet()
         scanFilesystemFolders(knownPaths, folders)
 
         val result = folders.values
-            .map { MediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri, it.count) }
+            .map { MediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri, it.count, it.isExternal) }
             .sortedByDescending { it.mediaCount }
         Log.w(TAG, "getAllMediaFolders: found ${result.size} folders: ${result.map { "${it.name}(${it.mediaCount})" }}")
         // Cache result and populate path cache for instant getFolderPath() lookups
@@ -112,7 +121,7 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
     ) {
         val extStorage = android.os.Environment.getExternalStorageDirectory()
         // Scan common top-level directories
-        val dirsToScan = listOf(
+        val dirsToScan = mutableListOf(
             File(extStorage, "Download"),
             File(extStorage, "Movies"),
             File(extStorage, "DCIM"),
@@ -122,9 +131,62 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
             File(extStorage, "Media")
         )
 
+        // Scan USB/external volumes (OTG drives, SD cards)
+        try {
+            val storageManager = context.getSystemService(android.content.Context.STORAGE_SERVICE) as android.os.storage.StorageManager
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                storageManager.storageVolumes.forEach { volume ->
+                    try {
+                        var volumeDir: File? = null
+                        // API 30+ has getDirectory()
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                            volumeDir = volume.directory
+                        }
+                        // Fallback: reflection for older APIs
+                        if (volumeDir == null) {
+                            val getPathMethod = volume.javaClass.getMethod("getPath")
+                            val volumePath = getPathMethod.invoke(volume) as? String
+                            if (volumePath != null) volumeDir = File(volumePath)
+                        }
+                        if (volumeDir != null && !volume.isPrimary && volumeDir.exists() && volumeDir.canRead()) {
+                            Log.i(TAG, "Found external volume: ${volume.getDescription(context)} at ${volumeDir.absolutePath}")
+                            dirsToScan.add(volumeDir)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error reading volume: ${volume.getDescription(context)}", e)
+                    }
+                }
+            }
+            // Also check common USB mount points
+            val usbMounts = listOf(
+                File("/storage"),
+                File("/mnt/media_rw")
+            )
+            for (mountPoint in usbMounts) {
+                if (mountPoint.exists() && mountPoint.isDirectory) {
+                    mountPoint.listFiles()?.forEach { volumeDir ->
+                        if (volumeDir.isDirectory && volumeDir.canRead()
+                            && volumeDir.absolutePath != extStorage.absolutePath
+                            && !volumeDir.name.equals("emulated", ignoreCase = true)
+                            && !volumeDir.name.equals("self", ignoreCase = true)
+                        ) {
+                            if (dirsToScan.none { it.absolutePath == volumeDir.absolutePath }) {
+                                Log.i(TAG, "Found USB/external mount: ${volumeDir.absolutePath}")
+                                dirsToScan.add(volumeDir)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error scanning external volumes", e)
+        }
+
         for (topDir in dirsToScan) {
             if (!topDir.exists() || !topDir.isDirectory) continue
-            scanDirForMediaFolders(topDir, knownPaths, folders, maxDepth = 3, currentDepth = 0)
+            // Use deeper scan for USB/external volumes (not under primary storage)
+            val isExternal = !topDir.absolutePath.startsWith(extStorage.absolutePath)
+            scanDirForMediaFolders(topDir, knownPaths, folders, maxDepth = if (isExternal) 5 else 3, currentDepth = 0, isExternal = isExternal)
         }
     }
 
@@ -133,7 +195,8 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
         knownPaths: Set<String>,
         folders: MutableMap<Long, MutableMediaFolder>,
         maxDepth: Int,
-        currentDepth: Int
+        currentDepth: Int,
+        isExternal: Boolean = false
     ) {
         if (currentDepth > maxDepth) return
         val files = dir.listFiles() ?: return
@@ -179,7 +242,7 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
             if (syntheticBucketId !in folders) {
                 val thumbUri = firstMediaFile?.let { Uri.fromFile(it) }
                 folders[syntheticBucketId] = MutableMediaFolder(
-                    syntheticBucketId, dir.name, dirPath, thumbUri, mediaCount
+                    syntheticBucketId, dir.name, dirPath, thumbUri, mediaCount, isExternal = isExternal
                 )
                 syntheticFolderPaths[syntheticBucketId] = dirPath
             }
@@ -188,7 +251,7 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
         // Recurse into subdirectories
         for (file in files) {
             if (file.isDirectory && !file.name.startsWith(".")) {
-                scanDirForMediaFolders(file, knownPaths, folders, maxDepth, currentDepth + 1)
+                scanDirForMediaFolders(file, knownPaths, folders, maxDepth, currentDepth + 1, isExternal = isExternal)
             }
         }
     }
@@ -528,6 +591,7 @@ class DeviceMediaScanner @Inject constructor(@ApplicationContext private val con
         val name: String,
         val path: String,
         var thumbnailUri: Uri?,
-        var count: Int
+        var count: Int,
+        var isExternal: Boolean = false
     )
 }

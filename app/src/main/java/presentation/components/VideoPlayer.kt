@@ -78,6 +78,8 @@ fun VideoPlayer(
     onToggleFavorite: (Uri) -> Unit = {},
     isFavorite: Boolean = false,
     onDelete: (Uri) -> Unit = {},
+    pipState: com.example.customgalleryviewer.logic.PipState? = null,
+    castManager: com.example.customgalleryviewer.util.CastManager? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -88,6 +90,9 @@ fun VideoPlayer(
     var isControlsVisible by remember { mutableStateOf(false) }
     var showActionMenu by remember { mutableStateOf(false) }
     var showSpeedMenu by remember { mutableStateOf(false) }
+    var showCastDialog by remember { mutableStateOf(false) }
+    var isDiscovering by remember { mutableStateOf(false) }
+    var showImageEditor by remember { mutableStateOf(false) }
 
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -97,6 +102,10 @@ fun VideoPlayer(
 
     var mediaGeneration by remember { mutableIntStateOf(0) }
     var endHandledForGeneration by remember { mutableIntStateOf(-1) }
+
+    // A-B Loop
+    var abLoopA by remember { mutableStateOf<Long?>(null) }
+    var abLoopB by remember { mutableStateOf<Long?>(null) }
 
     var isDragging by remember { mutableStateOf(false) }
     var isSeekMode by remember { mutableStateOf(false) }
@@ -140,6 +149,8 @@ fun VideoPlayer(
         isControlsVisible = false
         currentPosition = 0L
         duration = 0L
+        abLoopA = null
+        abLoopB = null
 
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
@@ -194,6 +205,14 @@ fun VideoPlayer(
                 currentPosition = exoPlayer.currentPosition
                 duration = exoPlayer.duration.coerceAtLeast(0L)
                 isPlaying = exoPlayer.isPlaying
+                pipState?.setVideoPlaying(exoPlayer.isPlaying)
+
+                // A-B Loop: seek back to A when reaching B
+                val a = abLoopA
+                val b = abLoopB
+                if (a != null && b != null && currentPosition >= b && exoPlayer.isPlaying) {
+                    exoPlayer.seekTo(a)
+                }
 
                 if (exoPlayer.playbackState == Player.STATE_ENDED &&
                     !isLooping &&
@@ -232,10 +251,13 @@ fun VideoPlayer(
             if (pos > 0 && dur > 0) {
                 onSavePosition(uri, pos, dur)
             }
+            pipState?.setVideoPlaying(false)
             exoPlayer.stop()
             exoPlayer.release()
         }
     }
+
+    val isInPipMode = pipState?.isInPipMode?.collectAsState()?.value ?: false
 
     Box(
         modifier = modifier
@@ -261,9 +283,9 @@ fun VideoPlayer(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Gesture layer — only active when controls are HIDDEN
+        // Gesture layer — only active when controls are HIDDEN and NOT in PiP
         // When controls visible, the overlay handles dismissal internally
-        if (!isControlsVisible) {
+        if (!isControlsVisible && !isInPipMode) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -413,7 +435,7 @@ fun VideoPlayer(
 
         // Controls overlay — single AnimatedVisibility with ALL controls including seek bar
         AnimatedVisibility(
-            visible = isControlsVisible,
+            visible = isControlsVisible && !isInPipMode,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.fillMaxSize()
@@ -484,6 +506,47 @@ fun VideoPlayer(
                                 isActive = isShuffleOn,
                                 onClick = onToggleShuffle
                             )
+                            // A-B Loop button
+                            Box {
+                                TextButton(
+                                    onClick = {
+                                        when {
+                                            abLoopA == null -> abLoopA = currentPosition
+                                            abLoopB == null -> {
+                                                val b = currentPosition
+                                                if (b > abLoopA!!) {
+                                                    abLoopB = b
+                                                } else {
+                                                    // If B < A, swap
+                                                    abLoopB = abLoopA
+                                                    abLoopA = b
+                                                }
+                                            }
+                                            else -> {
+                                                abLoopA = null
+                                                abLoopB = null
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.height(40.dp),
+                                    contentPadding = PaddingValues(horizontal = 6.dp)
+                                ) {
+                                    Text(
+                                        when {
+                                            abLoopA == null -> "A-B"
+                                            abLoopB == null -> "A-?"
+                                            else -> "A-B"
+                                        },
+                                        color = when {
+                                            abLoopA != null && abLoopB != null -> Color(0xFFFF9800)
+                                            abLoopA != null -> Color(0xFFFFEB3B)
+                                            else -> Color.White.copy(0.5f)
+                                        },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -560,6 +623,50 @@ fun VideoPlayer(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Cast button — standalone below top controls
+                if (castManager != null) {
+                    val isCasting by castManager.isCasting.collectAsState()
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isCasting) Color(0xFF00E5FF).copy(0.2f) else Color.Black.copy(0.4f),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(top = 56.dp, end = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clickable {
+                                    if (isCasting) {
+                                        scope.launch { castManager.stopCasting() }
+                                    } else {
+                                        showCastDialog = true
+                                        isDiscovering = true
+                                        scope.launch {
+                                            castManager.discoverDevices()
+                                            isDiscovering = false
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                if (isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
+                                "Cast",
+                                tint = if (isCasting) Color(0xFF00E5FF) else Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                if (isCasting) "Casting" else "Cast",
+                                color = if (isCasting) Color(0xFF00E5FF) else Color.White.copy(0.8f),
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -694,6 +801,28 @@ fun VideoPlayer(
                                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2)
                                 )
                             }
+                            // A-B Loop markers
+                            if (duration > 0) {
+                                abLoopA?.let { a ->
+                                    val ax = (a.toFloat() / duration) * w
+                                    drawLine(Color(0xFFFFEB3B), start = androidx.compose.ui.geometry.Offset(ax, -4f), end = androidx.compose.ui.geometry.Offset(ax, h + 4f), strokeWidth = 3f)
+                                }
+                                abLoopB?.let { b ->
+                                    val bx = (b.toFloat() / duration) * w
+                                    drawLine(Color(0xFFFF9800), start = androidx.compose.ui.geometry.Offset(bx, -4f), end = androidx.compose.ui.geometry.Offset(bx, h + 4f), strokeWidth = 3f)
+                                }
+                                // Highlight A-B region
+                                if (abLoopA != null && abLoopB != null) {
+                                    val ax = (abLoopA!!.toFloat() / duration) * w
+                                    val bx = (abLoopB!!.toFloat() / duration) * w
+                                    drawRect(
+                                        color = Color(0xFFFF9800).copy(alpha = 0.2f),
+                                        topLeft = androidx.compose.ui.geometry.Offset(ax, 0f),
+                                        size = androidx.compose.ui.geometry.Size(bx - ax, h)
+                                    )
+                                }
+                            }
+
                             // Thumb
                             drawCircle(
                                 color = Color.White,
@@ -816,6 +945,15 @@ fun VideoPlayer(
             }
         }
 
+        // Image editor — at VideoPlayer level so it survives ActionMenuDialog dismissal
+        if (showImageEditor) {
+            MediaEditorDialog(
+                uri = uri,
+                onDismiss = { showImageEditor = false },
+                onSaved = { onDelete(uri) }
+            )
+        }
+
         if (showActionMenu) {
             ActionMenuDialog(
                 uri = uri,
@@ -823,7 +961,85 @@ fun VideoPlayer(
                 onDismiss = { showActionMenu = false },
                 onToggleFavorite = onToggleFavorite,
                 isFavorite = isFavorite,
-                onDelete = onDelete
+                onDelete = onDelete,
+                onFileChanged = {
+                    // File was moved/copied — treat like delete (skip to next)
+                    showActionMenu = false
+                    onDelete(uri)
+                }
+            )
+        }
+
+        // Cast device picker dialog
+        if (showCastDialog && castManager != null) {
+            val castDevices by castManager.devices.collectAsState()
+            AlertDialog(
+                onDismissRequest = { showCastDialog = false },
+                title = { Text("Cast to Device") },
+                text = {
+                    Column {
+                        if (isDiscovering) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                Text("Searching for devices...")
+                            }
+                        }
+                        if (castDevices.isEmpty() && !isDiscovering) {
+                            Text("No devices found on your network.", modifier = Modifier.padding(vertical = 8.dp))
+                        }
+                        castDevices.forEach { device ->
+                            Surface(
+                                onClick = {
+                                    scope.launch {
+                                        castManager.castTo(device, uri)
+                                        showCastDialog = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color.Transparent
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        when (device.type) {
+                                            com.example.customgalleryviewer.util.DeviceType.CHROMECAST -> Icons.Default.Cast
+                                            com.example.customgalleryviewer.util.DeviceType.DLNA -> Icons.Default.Tv
+                                        },
+                                        null,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Column {
+                                        Text(device.name, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            device.type.name,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        isDiscovering = true
+                        scope.launch {
+                            castManager.discoverDevices()
+                            isDiscovering = false
+                        }
+                    }) { Text("Refresh") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCastDialog = false }) { Text("Cancel") }
+                }
             )
         }
     }
@@ -865,7 +1081,8 @@ fun ActionMenuDialog(
     onToggleFavorite: (Uri) -> Unit = {},
     isFavorite: Boolean = false,
     onDelete: (Uri) -> Unit = {},
-    onRenameFile: (Uri, String) -> Unit = { _, _ -> }
+    onRenameFile: (Uri, String) -> Unit = { _, _ -> },
+    onEdit: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val mediaInfo = remember { getMediaInfo(context, uri) }
@@ -889,6 +1106,13 @@ fun ActionMenuDialog(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(if (isFavorite) "Unfavorite" else "Favorite")
+                }
+                if (!isVideo) {
+                    TextButton(onClick = { onDismiss(); onEdit() }) {
+                        Icon(Icons.Default.PhotoFilter, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Edit")
+                    }
                 }
                 TextButton(onClick = { shareMedia(context, uri, isVideo); onDismiss() }) {
                     Icon(Icons.Default.Share, null)
@@ -922,19 +1146,20 @@ fun ActionMenuDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = {},
         shape = RoundedCornerShape(20.dp)
     )
 
     if (folderPickerOp != null) {
+        val currentOp = folderPickerOp!!
         FolderPickerDialog(
             uri = uri,
-            operation = folderPickerOp!!,
+            operation = currentOp,
             onDismiss = { folderPickerOp = null },
             onComplete = {
                 folderPickerOp = null
-                onFileChanged()
                 onDismiss()
+                try { onFileChanged() } catch (_: Exception) {}
             }
         )
     }

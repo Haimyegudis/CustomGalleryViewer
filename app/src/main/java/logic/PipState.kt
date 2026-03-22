@@ -11,7 +11,14 @@ class PipState @Inject constructor() {
     private val _isVideoPlaying = MutableStateFlow(false)
     val isVideoPlaying: StateFlow<Boolean> = _isVideoPlaying.asStateFlow()
 
+    private val _isInPipMode = MutableStateFlow(false)
+    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+
     fun setVideoPlaying(playing: Boolean) {
         _isVideoPlaying.value = playing
+    }
+
+    fun setInPipMode(inPip: Boolean) {
+        _isInPipMode.value = inPip
     }
 }

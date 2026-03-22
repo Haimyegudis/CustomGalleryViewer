@@ -13,9 +13,14 @@ import com.example.customgalleryviewer.util.DeviceMediaScanner
 import com.example.customgalleryviewer.util.MediaFolder
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -59,8 +64,15 @@ class HomeViewModel @Inject constructor(
     // Custom covers stored by bucketId
     private val _folderCovers = mutableStateMapOf<Long, Uri>()
 
+    // Favorite folders
+    private val _favoriteFolders = mutableStateMapOf<Long, Boolean>()
+
     private val prefs by lazy {
         context.getSharedPreferences("folder_covers", Context.MODE_PRIVATE)
+    }
+
+    private val favFolderPrefs by lazy {
+        context.getSharedPreferences("favorite_folders", Context.MODE_PRIVATE)
     }
 
     private val folderCachePrefs by lazy {
@@ -80,8 +92,47 @@ class HomeViewModel @Inject constructor(
             }
         }
 
+        // Load favorite folders
+        favFolderPrefs.all.forEach { (key, value) ->
+            val bucketId = key.toLongOrNull()
+            if (bucketId != null && value == true) {
+                _favoriteFolders[bucketId] = true
+            }
+        }
+
         // Eagerly load device folders at startup (show cached instantly, refresh in background)
         loadDeviceFolders()
+
+        // Listen for USB/media mount/unmount events to auto-refresh
+        val storageReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: Intent?) {
+                viewModelScope.launch {
+                    delay(3000) // Wait for mount to complete
+                    foldersLoaded = false
+                    loadDeviceFolders(force = true)
+                }
+            }
+        }
+        // Media mount events require "file" data scheme
+        val mediaFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_MEDIA_MOUNTED)
+            addAction(Intent.ACTION_MEDIA_UNMOUNTED)
+            addAction(Intent.ACTION_MEDIA_REMOVED)
+            addAction(Intent.ACTION_MEDIA_EJECT)
+            addDataScheme("file")
+        }
+        try { context.registerReceiver(storageReceiver, mediaFilter) } catch (_: Exception) {}
+        // USB events don't use data scheme — separate filter
+        val usbFilter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        try { context.registerReceiver(storageReceiver, usbFilter) } catch (_: Exception) {}
+        // Also listen for volume changes (Android 7+)
+        val volumeFilter = IntentFilter().apply {
+            addAction("android.os.storage.action.VOLUME_STATE_CHANGED")
+        }
+        try { context.registerReceiver(storageReceiver, volumeFilter) } catch (_: Exception) {}
 
         // Background preloading of folder files and playlist files
         viewModelScope.launch(Dispatchers.IO) {
@@ -165,12 +216,12 @@ class HomeViewModel @Inject constructor(
         return try {
             val type = object : TypeToken<List<CachedMediaFolder>>() {}.type
             val cached: List<CachedMediaFolder> = gson.fromJson(json, type)
-            cached.map { MediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri?.let { u -> Uri.parse(u) }, it.mediaCount) }
+            cached.map { MediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri?.let { u -> Uri.parse(u) }, it.mediaCount, it.isExternal) }
         } catch (_: Exception) { emptyList() }
     }
 
     private fun saveFoldersToCache(folders: List<MediaFolder>) {
-        val cached = folders.map { CachedMediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri?.toString(), it.mediaCount) }
+        val cached = folders.map { CachedMediaFolder(it.bucketId, it.name, it.path, it.thumbnailUri?.toString(), it.mediaCount, it.isExternal) }
         folderCachePrefs.edit().putString("folders", gson.toJson(cached)).apply()
     }
 
@@ -179,7 +230,8 @@ class HomeViewModel @Inject constructor(
         val name: String,
         val path: String,
         val thumbnailUri: String?,
-        val mediaCount: Int
+        val mediaCount: Int,
+        val isExternal: Boolean = false
     )
 
     fun deletePlaylist(playlistId: Long) {
@@ -217,5 +269,19 @@ class HomeViewModel @Inject constructor(
 
     fun getFilesInFolder(bucketId: Long): List<Uri> {
         return scanner.getFilesInFolder(bucketId)
+    }
+
+    fun isFolderFavorite(bucketId: Long): Boolean {
+        return _favoriteFolders[bucketId] == true
+    }
+
+    fun toggleFolderFavorite(bucketId: Long) {
+        if (_favoriteFolders[bucketId] == true) {
+            _favoriteFolders.remove(bucketId)
+            favFolderPrefs.edit().remove(bucketId.toString()).apply()
+        } else {
+            _favoriteFolders[bucketId] = true
+            favFolderPrefs.edit().putBoolean(bucketId.toString(), true).apply()
+        }
     }
 }

@@ -40,26 +40,32 @@ fun DeviceFolderScreen(
     var searchQuery by remember { mutableStateOf("") }
     var mediaFilter by remember { mutableStateOf(MediaFilterType.MIXED) }
 
-    // Filter files - use files directly for common case (no filter)
-    val filteredFiles = if (mediaFilter == MediaFilterType.MIXED && searchQuery.isEmpty()) files
-    else remember(files, searchQuery, mediaFilter) {
-        var result = files
-        if (mediaFilter != MediaFilterType.MIXED) {
-            result = result.filter { uri ->
-                val isVideoFile = isVideo(uri.toString())
-                when (mediaFilter) {
-                    MediaFilterType.VIDEO_ONLY -> isVideoFile
-                    MediaFilterType.PHOTOS_ONLY -> !isVideoFile
-                    else -> true
+    // Filter files asynchronously to avoid blocking the main thread
+    var filteredFiles by remember { mutableStateOf(files) }
+    LaunchedEffect(files, searchQuery, mediaFilter) {
+        if (mediaFilter == MediaFilterType.MIXED && searchQuery.isEmpty()) {
+            filteredFiles = files
+        } else {
+            filteredFiles = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                var result = files
+                if (mediaFilter != MediaFilterType.MIXED) {
+                    result = result.filter { uri ->
+                        val isVideoFile = isVideo(uri.toString())
+                        when (mediaFilter) {
+                            MediaFilterType.VIDEO_ONLY -> isVideoFile
+                            MediaFilterType.PHOTOS_ONLY -> !isVideoFile
+                            else -> true
+                        }
+                    }
                 }
+                if (searchQuery.isNotEmpty()) {
+                    result = result.filter {
+                        it.lastPathSegment?.contains(searchQuery, ignoreCase = true) == true
+                    }
+                }
+                result
             }
         }
-        if (searchQuery.isNotEmpty()) {
-            result = result.filter {
-                it.lastPathSegment?.contains(searchQuery, ignoreCase = true) == true
-            }
-        }
-        result
     }
 
     BackHandler(enabled = true) {
@@ -133,6 +139,8 @@ fun DeviceFolderScreen(
             val prefs = remember { context.getSharedPreferences("gallery_settings", android.content.Context.MODE_PRIVATE) }
             var isShuffleOn by remember { mutableStateOf(prefs.getBoolean("shuffle_on", false)) }
             var isRepeatListOn by remember { mutableStateOf(prefs.getBoolean("repeat_list_on", false)) }
+            val pipState = rememberPipState()
+            val castManager = rememberCastManager()
 
             PlayerContentView(
                 currentMedia = currentMedia,
@@ -153,7 +161,9 @@ fun DeviceFolderScreen(
                 onSaveWatchPosition = { uri, pos, dur -> viewModel.saveWatchPosition(uri, pos, dur) },
                 getWatchPosition = { uri -> viewModel.getWatchPosition(uri) },
                 onToggleFavorite = { uri -> viewModel.toggleFavorite(uri) },
-                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) }
+                isFavoriteCheck = { uri -> viewModel.isFavorite(uri) },
+                pipState = pipState,
+                castManager = castManager
             )
         }
     }

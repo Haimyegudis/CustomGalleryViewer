@@ -97,6 +97,10 @@ dependencies {
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
 
+    // Cast / MediaRouter
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("com.google.android.gms:play-services-cast-framework:21.4.0")
+
     // GSON
     implementation("com.google.code.gson:gson:2.10.1")
 
